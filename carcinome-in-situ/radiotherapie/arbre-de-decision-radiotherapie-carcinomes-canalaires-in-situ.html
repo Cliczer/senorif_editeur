@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arbre de décision radiothérapie CIS</title>
+<style>
+:root{
+  --blue:#4c78b8;
+  --text:#111827;
+  --muted:#6b7280;
+  --border:#e5e7eb;
+  --card:#f8fafc;
+  --green:#16a34a;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:white;
+  color:var(--text);
+  line-height:1.65;
+}
+main{
+  max-width:980px;
+  margin:0 auto;
+  padding:38px 24px 70px;
+}
+.back{
+  display:inline-block;
+  margin-bottom:28px;
+  color:var(--blue);
+  font-weight:800;
+  text-decoration:none;
+}
+.back:hover{text-decoration:underline}
+.content{
+  background:white;
+  border-top:10px solid var(--blue);
+  border-radius:20px;
+  box-shadow:0 10px 28px rgba(31,50,90,.08);
+  padding:34px;
+}
+h1{
+  color:var(--blue);
+  font-size:34px;
+  font-weight:500;
+  margin:0 0 14px;
+}
+h2{
+  color:var(--blue);
+  font-size:24px;
+  font-weight:500;
+  margin:0 0 22px;
+}
+p{font-size:16px;margin:0 0 16px}
+.test-btn{
+  border:0;
+  border-radius:999px;
+  background:var(--blue);
+  color:white;
+  padding:13px 20px;
+  font-weight:900;
+  cursor:pointer;
+  margin:8px 0 22px;
+}
+.test-btn:hover{filter:brightness(.95)}
+.quiz{
+  margin:10px 0 30px;
+  display:none;
+}
+.quiz.active{display:block}
+.question-card{
+  border:1px solid var(--border);
+  border-left:8px solid var(--blue);
+  border-radius:14px;
+  background:var(--card);
+  padding:18px;
+  margin:14px 0;
+}
+.question-card h3{
+  font-size:18px;
+  margin:0 0 8px;
+  color:#111827;
+}
+.help{
+  color:var(--muted);
+  font-size:14px;
+  margin:0 0 12px;
+}
+.choices{
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+}
+.choice{
+  border:1px solid var(--border);
+  background:white;
+  border-radius:10px;
+  padding:12px 14px;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+}
+.choice:hover{
+  border-color:var(--blue);
+  background:#eef5ff;
+}
+.choice.selected{
+  background:#e8f1ff;
+  border-color:var(--blue);
+  color:#274f91;
+}
+.result{
+  border:1px solid #bbf7d0;
+  border-left:8px solid var(--green);
+  border-radius:14px;
+  background:#f0fdf4;
+  padding:20px;
+  margin:16px 0 24px;
+}
+.result h3{
+  margin:0 0 10px;
+  color:#166534;
+}
+.result ul{
+  margin:0 0 0 22px;
+}
+.reset{
+  border:1px solid var(--border);
+  background:white;
+  color:var(--blue);
+  border-radius:999px;
+  padding:10px 16px;
+  font-weight:900;
+  cursor:pointer;
+  margin-top:8px;
+}
+.tree-image{
+  margin-top:30px;
+}
+.tree-image h2{
+  margin-bottom:14px;
+}
+.tree-image img{
+  max-width:100%;
+  height:auto;
+  display:block;
+  margin:0 auto;
+  border-radius:12px;
+}
+.note{
+  margin-top:20px;
+  padding:14px 16px;
+  background:#f9fafb;
+  border:1px solid var(--border);
+  border-radius:12px;
+  color:var(--muted);
+  font-size:14px;
+}
+@media(max-width:600px){
+  main{padding:28px 18px 60px}
+  .content{padding:24px}
+  h1{font-size:28px}
+}
+</style>
+</head>
+<body>
+<main>
+<a class="back" href="index.html">← Retour à Radiothérapie</a>
+
+<div class="content">
+  <h1>Radiothérapie — Carcinome in situ (CIS)</h1>
+  <h2>Arbre de décision pour la radiothérapie des carcinomes canalaires in situ</h2>
+
+  <button class="test-btn" type="button" onclick="startQuiz()">Faire un test</button>
+
+  <div id="quiz" class="quiz"></div>
+
+  <section class="tree-image">
+    <h2>Arbre de décision</h2>
+    <img src="../../images/arbre-radiotherapie-cis.jpeg" alt="Arbre de décision pour la radiothérapie des carcinomes canalaires in situ">
+  </section>
+
+  <div class="note">
+    MCC = microcalcifications. RMI = reconstruction mammaire immédiate.
+  </div>
+</div>
+</main>
+
+<script>
+let TREE = null;
+let path = [];
+
+fetch("arbre-radiotherapie-cis.json?v=" + Date.now())
+  .then(function(r){
+    if(!r.ok) throw new Error("Impossible de charger le JSON");
+    return r.json();
+  })
+  .then(function(data){
+    TREE = data;
+  })
+  .catch(function(err){
+    document.getElementById("quiz").innerHTML =
+      "<div class='question-card'>Erreur de chargement du questionnaire : " + err.message + "</div>";
+  });
+
+function startQuiz(){
+  if(!TREE){
+    alert("Le questionnaire est encore en chargement. Réessaie dans une seconde.");
+    return;
+  }
+  path = [];
+  const quiz = document.getElementById("quiz");
+  quiz.classList.add("active");
+  renderQuestion(TREE);
+}
+
+function renderQuestion(node){
+  const quiz = document.getElementById("quiz");
+
+  if(path.length === 0){
+    quiz.innerHTML = "";
+  }
+
+  if(node.type === "resultat"){
+    renderResult(node);
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "question-card";
+
+  const title = document.createElement("h3");
+  title.textContent = node.titre || "Question";
+  card.appendChild(title);
+
+  if(node.aide){
+    const help = document.createElement("p");
+    help.className = "help";
+    help.textContent = node.aide;
+    card.appendChild(help);
+  }
+
+  const choices = document.createElement("div");
+  choices.className = "choices";
+
+  Object.keys(node.choix || {}).forEach(function(label){
+    const btn = document.createElement("button");
+    btn.className = "choice";
+    btn.type = "button";
+    btn.textContent = label;
+
+    btn.onclick = function(){
+      Array.from(choices.querySelectorAll(".choice")).forEach(function(b){
+        b.disabled = true;
+        b.classList.remove("selected");
+      });
+      btn.classList.add("selected");
+
+      path.push({question: node.titre, reponse: label});
+      renderQuestion(node.choix[label]);
+    };
+
+    choices.appendChild(btn);
+  });
+
+  card.appendChild(choices);
+  quiz.appendChild(card);
+  card.scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+
+function renderResult(node){
+  const quiz = document.getElementById("quiz");
+
+  const result = document.createElement("div");
+  result.className = "result";
+
+  let html = "<h3>" + (node.titre || "Résultat") + "</h3>";
+
+  if(node.recommandations && node.recommandations.length){
+    html += "<ul>";
+    node.recommandations.forEach(function(item){
+      html += "<li>" + escapeHtml(item) + "</li>";
+    });
+    html += "</ul>";
+  }
+
+  if(TREE.note_boost && TREE.note_boost.length){
+    html += "<div class='note'><strong>Note sur le boost :</strong><ul>";
+    TREE.note_boost.forEach(function(item){
+      html += "<li>" + escapeHtml(item) + "</li>";
+    });
+    html += "</ul></div>";
+  }
+
+  html += "<button class='reset' type='button' onclick='startQuiz()'>Recommencer le test</button>";
+
+  result.innerHTML = html;
+  quiz.appendChild(result);
+  result.scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+
+function escapeHtml(str){
+  return String(str || "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+</script>
+</body>
+</html>
