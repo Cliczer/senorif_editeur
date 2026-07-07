@@ -1554,8 +1554,16 @@ function homeCss(){return`:root {
 body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 .wrapper{max-width:1180px;margin:0 auto;padding:34px 22px 70px}
 header{text-align:center;margin-bottom:30px}
+.header-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:20px}
+.header-title{flex:1 1 auto;min-width:260px}
+.header-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
 h1{color:#4868a8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .subtitle{color:#617086;font-size:17px;margin-top:8px}
+.pdf-button{display:inline-flex;align-items:center;gap:8px;background:#4868a8;color:white;font-weight:800;font-size:14px;padding:12px 18px;border-radius:999px;text-decoration:none;white-space:nowrap;box-shadow:0 3px 10px rgba(31,50,90,.16)}
+.pdf-button:hover{background:#3a5690}
+.specialty-button{background:#48A68D}
+.specialty-button:hover{background:#3a8873}
+@media(max-width:640px){.header-top{flex-direction:column}}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start}
 
 .chapter summary{
@@ -1640,6 +1648,70 @@ h1{color:#4868a8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .search-result-snippet{font-size:13px;color:#455066;line-height:1.4}
 .search-empty{padding:12px 14px;color:#617086;font-size:14px}`}
 
+// Classement par spécialité (dossiers/chapitres). "dossier" omis = tout le chapitre.
+const SPECIALTY_MAP=[
+  {label:"Oncogénétique", items:[{chapitre:"Génétique, dépistage, prévention"}]},
+  {label:"Radiologie", items:[{chapitre:"Imagerie"}]},
+  {label:"Anatomopathologie", items:[
+    {chapitre:"Anatomopathologie"},
+    {chapitre:"Lésions bénignes et B3"},
+    {chapitre:"Génomique tumorale"}
+  ]},
+  {label:"Chirurgie", items:[
+    {chapitre:"Chirurgie"},
+    {chapitre:"Carcinome in situ (CIS)", dossier:"Chirurgie"}
+  ]},
+  {label:"Radiothérapie", items:[
+    {chapitre:"Carcinome in situ (CIS)", dossier:"Radiothérapie des carcinomes in situ"},
+    {chapitre:"Traitements des cancers infiltrants", dossier:"Radiothérapie des formes infiltrantes"}
+  ]},
+  {label:"Oncologie médicale", items:[
+    {chapitre:"Traitements des cancers infiltrants", dossier:"Traitements médicaux néoadjuvants"},
+    {chapitre:"Traitements des cancers infiltrants", dossier:"Traitements médicaux adjuvants"},
+    {chapitre:"Traitements des cancers infiltrants", dossier:"Formes particulières"},
+    {chapitre:"Traitements des cancers infiltrants", dossier:"Formes localement avancées"},
+    {chapitre:"Cancer du sein avancé"}
+  ]},
+  {label:"Soins de support", items:[{chapitre:"Soins de support"}]},
+  {label:"Général / Références", items:[
+    {chapitre:"Généralités"},
+    {chapitre:"Liens utiles & outils"}
+  ]}
+];
+
+function generateSpecialtyPage(){
+  function findChapter(titre){ return data.chapitres.find(c=>c.titre===titre); }
+  function findChild(ch,titre){ return (ch.enfants||[]).find(e=>e.titre===titre); }
+  function hrefForChapter(ch){ return slugify(ch.slug||ch.titre)+"/index.html"; }
+
+  const colors=["#5570AE","#D9A441","#8E7CC3","#48A68D","#3F8CC9","#E67E22","#C15A8A","#5570AE"];
+  let b="";
+  SPECIALTY_MAP.forEach((spec,i)=>{
+    let items=spec.items.map(it=>{
+      let ch=findChapter(it.chapitre);
+      if(!ch) return "";
+      if(it.dossier){
+        let node=findChild(ch,it.dossier);
+        if(!node) return "";
+        return `<li><a class="subchapter-btn" href="${hrefForHome(ch,node)}"><span class="chev">›</span><span>${esc(node.titre)}</span></a></li>`;
+      }
+      return `<li><a class="subchapter-btn" href="${hrefForChapter(ch)}"><span class="chev">›</span><span>${esc(ch.titre)}</span></a></li>`;
+    }).join("");
+    b+=`<details class="chapter" style="--accent:${colors[i%colors.length]}">
+  <summary><span class="summary-title">${esc(spec.label)}</span></summary>
+  <div class="panel"><div class="arrow"></div><h2>${esc(spec.label)}</h2><ul>${items}</ul></div>
+</details>`;
+  });
+
+  return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Entrée par spécialité — ${esc(data.titre)}</title><style>${homeCss()}</style></head><body><div class="wrapper"><header>
+<div class="header-top">
+<div class="header-title"><h1>Entrée par spécialité</h1><p class="subtitle"><a href="index.html" style="color:#4868a8;font-weight:800;text-decoration:none;">← Retour à l'accueil</a></p></div>
+</div>
+</header>
+<div class="grid">${b}</div></div>
+</body></html>`;
+}
+
 function hrefForHome(ch,c){
   return ch.slug+"/"+(c.type==="folder" ? c.slug+"/index.html" : c.slug+".html");
 }
@@ -1653,7 +1725,15 @@ function generateHome(){
   <div class="panel"><div class="arrow"></div><h2>${esc(ch.titre)}</h2><ul>${items}</ul></div>
 </details>`;
   });
-  return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(data.titre)}</title><style>${homeCss()}</style></head><body><div class="wrapper"><header><h1>${esc(data.titre)}</h1><p class="subtitle">${esc(data.sous_titre||"Cancers et pathologies du sein")}</p></header>
+  return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(data.titre)}</title><style>${homeCss()}</style></head><body><div class="wrapper"><header>
+<div class="header-top">
+<div class="header-title"><h1>${esc(data.titre)}</h1><p class="subtitle">${esc(data.sous_titre||"Cancers et pathologies du sein")}</p></div>
+<div class="header-actions">
+<a class="pdf-button" href="https://cdn.curie.fr/media/ckeditor_pdf/SENORIF_2025-2026_1911.pdf" target="_blank" rel="noopener">📄 Parcourir le SENORIF</a>
+<a class="pdf-button specialty-button" href="specialites.html">🩺 Entrée par spécialité</a>
+</div>
+</div>
+</header>
 <div class="search-wrap">
 <input autocomplete="off" class="search-box" id="siteSearch" placeholder="Rechercher un mot-clé…" type="search">
 <div class="search-results" id="searchResults"></div>
@@ -1940,6 +2020,7 @@ async function exportZip(){
   zip.folder("tableaux");
 
   zip.file("index.html",generateHome());
+  zip.file("specialites.html",generateSpecialtyPage());
 
   async function addFolder(folder,pathParts){
     let folderPath=pathParts.join("/");
