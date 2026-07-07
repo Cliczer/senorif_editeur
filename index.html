@@ -379,14 +379,43 @@ async function importZip(file){
   if(typeof JSZip==="undefined") return alert("JSZip non chargé.");
   setStatus("Lecture du ZIP...");
   let zip=await JSZip.loadAsync(file), files={}; assets={};
+  let dataJsonCandidates=[];
 
   for(let [path,obj] of Object.entries(zip.files)){
     if(obj.dir) continue;
     let p=cleanPath(path), base=p.split("/").pop();
     if(RESERVED_FILES.has(base)) continue;
     if(p.toLowerCase().endsWith(".html")) files[p]=await obj.async("string");
-    else if(p.toLowerCase().endsWith(".json")) assets[p]=await obj.async("string");
+    else if(p.toLowerCase().endsWith(".json")){
+      let text=await obj.async("string");
+      assets[p]=text;
+      dataJsonCandidates.push({path:p,text});
+    }
     else assets[p]=await obj.async("uint8array");
+  }
+
+  // ZIP "brut" généré par le script Python/Colab : un JSON {data:{...,chapitres:[...]}}
+  // accompagné d'un dossier images/, sans pages HTML. On le distingue d'un ZIP de site déjà exporté.
+  let rawData=null, rawDataPath=null;
+  if(!Object.keys(files).length){
+    for(let cand of dataJsonCandidates){
+      try{
+        let obj=JSON.parse(cand.text);
+        let candidate=obj&&obj.data?obj.data:obj;
+        if(candidate&&Array.isArray(candidate.chapitres)){
+          rawData=candidate; rawDataPath=cand.path; break;
+        }
+      }catch(e){/* pas un JSON de données, on ignore */}
+    }
+  }
+
+  if(rawData){
+    delete assets[rawDataPath];
+    data=rawData;
+    selectedId=data.chapitres[0]?.id||null;
+    render();
+    setStatus("JSON + images importés (" + Object.keys(assets).length + " fichier(s) dans assets).");
+    return;
   }
 
   data=buildDataFromFiles(files);
