@@ -1272,6 +1272,12 @@ function sanitizeContentHtml(root){
       return;
     }
 
+    // Tableaux : on garde tel quel (structure + style), sinon les bordures,
+    // l'entête et les couleurs des tableaux importés (Word/python) disparaissent.
+    if(["TABLE","THEAD","TBODY","TR","TD","TH"].includes(tag)){
+      return;
+    }
+
     const style = (el.getAttribute("style") || "").toLowerCase();
 
     // Certains PDF/Safari mettent le gras uniquement en CSS.
