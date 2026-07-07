@@ -1637,6 +1637,7 @@ h1{color:#4868a8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .search-result:hover{background:#f3f6fb}
 .search-result-title{font-weight:900;color:#4868a8;margin-bottom:4px}
 .search-result-path{font-size:12px;font-weight:700;color:#617086;margin-bottom:5px}
+.search-result-snippet{font-size:13px;color:#455066;line-height:1.4}
 .search-empty{padding:12px 14px;color:#617086;font-size:14px}`}
 
 function hrefForHome(ch,c){
@@ -1665,21 +1666,26 @@ function generateHome(){
   const box=document.getElementById("siteSearch");
   const results=document.getElementById("searchResults");
   if(!box||!results)return;
-  function items(){
-    return Array.from(document.querySelectorAll("a.subchapter-btn")).map(a=>{
-      const panel=a.closest(".panel");
-      const chapter=panel&&panel.querySelector("h2")?panel.querySelector("h2").textContent.trim():"";
-      return {title:a.textContent.replace("›","").trim(),href:a.getAttribute("href")||"#",chapter:chapter,text:(chapter+" "+a.textContent).trim()};
-    });
+  function snippetAround(text, normText, q){
+    const i=normText.indexOf(q);
+    if(i<0) return "";
+    const start=Math.max(0, i-50), end=Math.min(text.length, i+q.length+70);
+    return (start>0?"… ":"") + text.slice(start,end).trim() + (end<text.length?" …":"");
   }
-  const index=items();
+  let index=[];
+  fetch("search-index.json").then(r=>r.ok?r.json():[]).then(function(d){index=Array.isArray(d)?d:[]}).catch(function(){index=[]});
   box.addEventListener("input",function(){
     const q=norm(box.value.trim());
     results.innerHTML="";
     if(q.length<2){results.classList.remove("open");return}
     const found=index.filter(x=>norm(x.text).includes(q)).slice(0,40);
     if(!found.length){results.innerHTML='<div class="search-empty">Aucun résultat trouvé.</div>';results.classList.add("open");return}
-    results.innerHTML=found.map(x=>'<a class="search-result" href="'+escS(x.href)+'"><div class="search-result-title">'+escS(x.title)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div></a>').join("");
+    results.innerHTML=found.map(function(x){
+      const normText=norm(x.text);
+      const snip=snippetAround(x.text, normText, q);
+      return '<a class="search-result" href="'+escS(x.href)+'"><div class="search-result-title">'+escS(x.title)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div>'
+        +(snip?'<div class="search-result-snippet">'+escS(snip)+'</div>':'')+'</a>';
+    }).join("");
     results.classList.add("open");
   });
   document.addEventListener("click",function(e){if(!e.target.closest(".search-wrap"))results.classList.remove("open")});
@@ -1878,6 +1884,54 @@ async function generatePageAt(n,depth,zip){
   return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(n.titre)} — SENORIF</title><style>${pageCss()}</style></head><body><main><a class="back" href="${back}">← Retour</a><div class="content" style="--blue:${n.color||"#4c78b8"}"><h1>${esc(n.titre)}</h1>${quizButton}${body}</div></main>${quizScript}${tableScript}</body></html>`;
 }
 
+function stripHtmlToText(html){
+  const d=document.createElement("div");
+  d.innerHTML=html||"";
+  return (d.textContent||"").replace(/\s+/g," ").trim();
+}
+
+// Index de recherche plein-texte : parcourt TOUT l'arbre (pas seulement les
+// enfants directs d'un chapitre) et associe à chaque page/dossier son
+// chemin final, pour que la recherche trouve n'importe quel mot du contenu.
+function buildSearchIndex(){
+  const entries=[];
+
+  function walkFolder(node, pathParts, chapterTitle){
+    const folderPath=pathParts.join("/");
+    const text=stripHtmlToText(node.contenu_html);
+    entries.push({
+      title:node.titre, href:folderPath+"/index.html", chapter:chapterTitle,
+      text:(chapterTitle+" "+node.titre+" "+text).trim()
+    });
+    (node.enfants||[]).forEach(child=>{
+      const slug=slugify(child.slug||child.titre);
+      if(child.type==="folder"){
+        walkFolder(child, pathParts.concat(slug), chapterTitle);
+      }else{
+        const ctext=stripHtmlToText(child.contenu_html);
+        entries.push({
+          title:child.titre, href:folderPath+"/"+slug+".html", chapter:chapterTitle,
+          text:(chapterTitle+" "+child.titre+" "+ctext).trim()
+        });
+      }
+    });
+  }
+
+  data.chapitres.forEach(ch=>{
+    const slug=slugify(ch.slug||ch.titre);
+    if(ch.type==="folder"){
+      walkFolder(ch, [slug], ch.titre);
+    }else{
+      entries.push({
+        title:ch.titre, href:slug+".html", chapter:ch.titre,
+        text:(ch.titre+" "+stripHtmlToText(ch.contenu_html)).trim()
+      });
+    }
+  });
+
+  return entries.filter(e=>e.text);
+}
+
 async function exportZip(){
   let zip=new JSZip();
 
@@ -1920,6 +1974,8 @@ async function exportZip(){
       zip.file(ch.slug+".html",await generatePageAt(ch,0,zip));
     }
   }
+
+  zip.file("search-index.json", JSON.stringify(buildSearchIndex()));
 
   let blob=await zip.generateAsync({type:"blob"});
   let a=document.createElement("a");
