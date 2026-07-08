@@ -1693,11 +1693,16 @@ h1{color:#4868a8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .search-wrap{max-width:760px;margin:22px auto 28px;position:relative}
 .search-box{width:100%;border:1px solid rgba(85,112,174,.28);border-radius:999px;padding:14px 18px;font-size:16px;color:var(--text);outline:none;box-shadow:0 3px 12px rgba(31,50,90,.06)}
 .search-box:focus{border-color:#5570AE;box-shadow:0 0 0 4px rgba(85,112,174,.13)}
-.search-results{display:none;position:absolute;z-index:20;left:0;right:0;top:54px;background:white;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 12px 30px rgba(31,50,90,.16);padding:10px;max-height:420px;overflow:auto;text-align:left}
+.search-filters{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.search-filter{border:1px solid rgba(85,112,174,.28);background:white;color:#4868a8;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer}
+.search-filter:hover{background:#eef3fb}
+.search-filter.active{background:#4868a8;color:white;border-color:#4868a8}
+.search-results{display:none;position:absolute;z-index:20;left:0;right:0;top:96px;background:white;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 12px 30px rgba(31,50,90,.16);padding:10px;max-height:420px;overflow:auto;text-align:left}
 .search-results.open{display:block}
 .search-result{display:block;padding:12px 14px;border-radius:12px;color:var(--text);text-decoration:none}
 .search-result:hover{background:#f3f6fb}
-.search-result-title{font-weight:900;color:#4868a8;margin-bottom:4px}
+.search-result-title{font-weight:900;color:#4868a8;margin-bottom:4px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.result-badge{font-size:11px;font-weight:800;color:#5570AE;background:#eef1fa;border-radius:999px;padding:2px 9px}
 .search-result-path{font-size:12px;font-weight:700;color:#617086;margin-bottom:5px}
 .search-result-snippet{font-size:13px;color:#455066;line-height:1.4}
 .search-result-snippet mark{background:#fff3a3;padding:0 2px;border-radius:3px}
@@ -1791,6 +1796,11 @@ function generateHome(){
 </header>
 <div class="search-wrap">
 <input autocomplete="off" class="search-box" id="siteSearch" placeholder="Rechercher un mot-clé…" type="search">
+<div class="search-filters" id="searchFilters">
+<button type="button" class="search-filter active" data-filter="all">Tout</button>
+<button type="button" class="search-filter" data-filter="image">🖼️ Images</button>
+<button type="button" class="search-filter" data-filter="table">📊 Tableaux</button>
+</div>
 <div class="search-results" id="searchResults"></div>
 </div>
 <div class="grid">${b}</div></div>
@@ -1800,36 +1810,62 @@ function generateHome(){
   function escS(v){return String(v||"").replace(/[&<>"']/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#039;"}[m]})}
   const box=document.getElementById("siteSearch");
   const results=document.getElementById("searchResults");
+  const filterBar=document.getElementById("searchFilters");
   if(!box||!results)return;
+  let activeFilter="all";
   function snippetAround(text, normText, q){
     const i=normText.indexOf(q);
     if(i<0) return "";
     const start=Math.max(0, i-50), end=Math.min(text.length, i+q.length+70);
     return (start>0?"… ":"") + text.slice(start,end).trim() + (end<text.length?" …":"");
   }
+  function matchesFilter(x){
+    if(activeFilter==="image") return !!x.img;
+    if(activeFilter==="table") return !!x.tab;
+    return true;
+  }
+  function badgesFor(x){
+    let h="";
+    if(x.img) h+='<span class="result-badge">🖼️ Image</span>';
+    if(x.tab) h+='<span class="result-badge">📊 Tableau</span>';
+    return h;
+  }
   let index=[];
   fetch("search-index.json").then(r=>r.ok?r.json():[]).then(function(d){index=Array.isArray(d)?d:[]}).catch(function(){index=[]});
-  box.addEventListener("input",function(){
+  function runSearch(){
     const rawQ=box.value.trim();
     const q=norm(rawQ);
     results.innerHTML="";
-    if(q.length<2){results.classList.remove("open");return}
-    const found=index.filter(x=>norm(x.text).includes(q)).slice(0,40);
+    if(q.length<2 && activeFilter==="all"){results.classList.remove("open");return}
+    const found=index.filter(function(x){
+      return (q.length<2 || norm(x.text).includes(q)) && matchesFilter(x);
+    }).slice(0,40);
     if(!found.length){results.innerHTML='<div class="search-empty">Aucun résultat trouvé.</div>';results.classList.add("open");return}
     results.innerHTML=found.map(function(x){
       const normText=norm(x.text);
-      const snip=snippetAround(x.text, normText, q);
-      const hrefWithHl=x.href+(x.href.includes("?")?"&":"?")+"hl="+encodeURIComponent(rawQ);
+      const snip=q.length>=2?snippetAround(x.text, normText, q):"";
+      const hrefWithHl=x.href+(q.length>=2?(x.href.includes("?")?"&":"?")+"hl="+encodeURIComponent(rawQ):"");
       let snipHtml=escS(snip);
       if(snip){
         const re=new RegExp("("+rawQ.trim().replace(/[.*+?^\${}()|[\]\\]/g,"\\$&")+")","gi");
         snipHtml=snipHtml.replace(re,"<mark>$1</mark>");
       }
-      return '<a class="search-result" href="'+escS(hrefWithHl)+'"><div class="search-result-title">'+escS(x.title)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div>'
+      return '<a class="search-result" href="'+escS(hrefWithHl)+'"><div class="search-result-title">'+escS(x.title)+badgesFor(x)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div>'
         +(snip?'<div class="search-result-snippet">'+snipHtml+'</div>':'')+'</a>';
     }).join("");
     results.classList.add("open");
-  });
+  }
+  box.addEventListener("input",runSearch);
+  if(filterBar){
+    filterBar.addEventListener("click",function(e){
+      const btn=e.target.closest(".search-filter");
+      if(!btn)return;
+      Array.from(filterBar.querySelectorAll(".search-filter")).forEach(function(b){b.classList.remove("active")});
+      btn.classList.add("active");
+      activeFilter=btn.getAttribute("data-filter");
+      runSearch();
+    });
+  }
   document.addEventListener("click",function(e){if(!e.target.closest(".search-wrap"))results.classList.remove("open")});
 })();<\/script>
 </body></html>`;
@@ -2268,6 +2304,9 @@ function stripHtmlToText(html){
 // Index de recherche plein-texte : parcourt TOUT l'arbre (pas seulement les
 // enfants directs d'un chapitre) et associe à chaque page/dossier son
 // chemin final, pour que la recherche trouve n'importe quel mot du contenu.
+function hasImg(html){ return /<img[\s>]/i.test(html||""); }
+function hasTable(html){ return /<table[\s>]/i.test(html||""); }
+
 function buildSearchIndex(){
   const entries=[];
 
@@ -2276,7 +2315,8 @@ function buildSearchIndex(){
     const text=stripHtmlToText(node.contenu_html);
     entries.push({
       title:node.titre, href:folderPath+"/index.html", chapter:chapterTitle,
-      text:(chapterTitle+" "+node.titre+" "+text).trim()
+      text:(chapterTitle+" "+node.titre+" "+text).trim(),
+      img:hasImg(node.contenu_html), tab:hasTable(node.contenu_html)
     });
     (node.enfants||[]).forEach(child=>{
       const slug=slugify(child.slug||child.titre);
@@ -2286,7 +2326,8 @@ function buildSearchIndex(){
         const ctext=stripHtmlToText(child.contenu_html);
         entries.push({
           title:child.titre, href:folderPath+"/"+slug+".html", chapter:chapterTitle,
-          text:(chapterTitle+" "+child.titre+" "+ctext).trim()
+          text:(chapterTitle+" "+child.titre+" "+ctext).trim(),
+          img:hasImg(child.contenu_html), tab:hasTable(child.contenu_html)
         });
       }
     });
@@ -2299,7 +2340,8 @@ function buildSearchIndex(){
     }else{
       entries.push({
         title:ch.titre, href:slug+".html", chapter:ch.titre,
-        text:(ch.titre+" "+stripHtmlToText(ch.contenu_html)).trim()
+        text:(ch.titre+" "+stripHtmlToText(ch.contenu_html)).trim(),
+        img:hasImg(ch.contenu_html), tab:hasTable(ch.contenu_html)
       });
     }
   });
