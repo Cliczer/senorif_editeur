@@ -1711,7 +1711,8 @@ h1{color:#3f6aa8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .search-result-path{font-size:12px;font-weight:700;color:#617086;margin-bottom:5px}
 .search-result-snippet{font-size:13px;color:#455066;line-height:1.4}
 .search-result-snippet mark{background:#fff3a3;padding:0 2px;border-radius:3px}
-.search-empty{padding:12px 14px;color:#617086;font-size:14px}`}
+.search-empty{padding:12px 14px;color:#617086;font-size:14px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}`}
 
 // Classement par spécialité (dossiers/chapitres). "dossier" omis = tout le chapitre.
 const SPECIALTY_MAP=[
@@ -1806,11 +1807,12 @@ function generateHome(){
 <div class="search-wrap">
 <input autocomplete="off" class="search-box" id="siteSearch" placeholder="Rechercher un mot-clé…" type="search">
 <div class="search-filters" id="searchFilters">
-<button type="button" class="search-filter active" data-filter="all">Tout</button>
-<button type="button" class="search-filter" data-filter="image">🖼️ Images</button>
-<button type="button" class="search-filter" data-filter="table">📊 Tableaux</button>
+<button type="button" class="search-filter active" data-filter="all" aria-pressed="true">Tout</button>
+<button type="button" class="search-filter" data-filter="image" aria-pressed="false">🖼️ Images</button>
+<button type="button" class="search-filter" data-filter="table" aria-pressed="false">📊 Tableaux</button>
 </div>
 <div class="search-results" id="searchResults"></div>
+<div class="sr-only" id="searchStatus" role="status" aria-live="polite"></div>
 </div>
 <div class="grid">${b}</div></div>
 <script>(function(){const host=window.location.hostname;const pathParts=window.location.pathname.split("/").filter(Boolean);const OWNER=host.endsWith("github.io")?host.split(".")[0]:"Cliczer";const REPO=pathParts[0]||"Senorif";const CACHE_KEY="senorif_update_dates_v1";const CACHE_TTL=24*60*60*1000;function readCache(){try{return JSON.parse(localStorage.getItem(CACHE_KEY)||"{}")}catch(e){return{}}}function writeCache(c){try{localStorage.setItem(CACHE_KEY,JSON.stringify(c))}catch(e){}}function formatDate(d){return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"})}async function getLastUpdate(folderPath){const cache=readCache();const hit=cache[folderPath];if(hit && (Date.now()-hit.ts)<CACHE_TTL){return hit.iso?new Date(hit.iso):null}try{const url="https://api.github.com/repos/"+OWNER+"/"+REPO+"/commits?path="+encodeURIComponent(folderPath)+"&per_page=1";const r=await fetch(url);if(!r.ok){cache[folderPath]={ts:Date.now(),iso:null};writeCache(cache);return null}const commits=await r.json();const iso=(Array.isArray(commits)&&commits.length)?commits[0].commit.committer.date:null;cache[folderPath]={ts:Date.now(),iso};writeCache(cache);return iso?new Date(iso):null}catch(e){return null}}async function loadDates(){const chapters=document.querySelectorAll(".chapter");for(const chapter of chapters){const dateEl=chapter.querySelector(".update-date");const folderPath=chapter.getAttribute("data-path");if(!dateEl||!folderPath||folderPath==="#"){if(dateEl)dateEl.textContent="MAJ : —";continue}const date=await getLastUpdate(folderPath);dateEl.textContent=date?"MAJ : "+formatDate(date):"MAJ : —"}}loadDates()})();<\/script>
@@ -1820,6 +1822,7 @@ function generateHome(){
   const box=document.getElementById("siteSearch");
   const results=document.getElementById("searchResults");
   const filterBar=document.getElementById("searchFilters");
+  const status=document.getElementById("searchStatus");
   if(!box||!results)return;
   let activeFilter="all";
   function snippetAround(text, normText, q){
@@ -1872,8 +1875,14 @@ function generateHome(){
     if(q.length>=2){
       found=found.map(function(x){return {x:x,s:scoreEntry(x,q)}}).sort(function(a,b){return b.s-a.s}).map(function(p){return p.x});
     }
+    const totalFound=found.length;
     found=found.slice(0,40);
-    if(!found.length){results.innerHTML='<div class="search-empty">Aucun résultat trouvé.</div>';results.classList.add("open");return}
+    if(!found.length){
+      results.innerHTML='<div class="search-empty">Aucun résultat trouvé.</div>';
+      results.classList.add("open");
+      if(status) status.textContent="Aucun résultat trouvé.";
+      return;
+    }
     results.innerHTML=found.map(function(x){
       const normText=x._normText;
       const snip=q.length>=2?snippetAround(x.text, normText, q):"";
@@ -1887,14 +1896,23 @@ function generateHome(){
         +(snip?'<div class="search-result-snippet">'+snipHtml+'</div>':'')+'</a>';
     }).join("");
     results.classList.add("open");
+    if(status){
+      status.textContent = totalFound>40
+        ? totalFound+" résultats trouvés, 40 affichés."
+        : totalFound+" résultat"+(totalFound>1?"s":"")+" trouvé"+(totalFound>1?"s":"")+".";
+    }
   }
   box.addEventListener("input",runSearch);
   if(filterBar){
     filterBar.addEventListener("click",function(e){
       const btn=e.target.closest(".search-filter");
       if(!btn)return;
-      Array.from(filterBar.querySelectorAll(".search-filter")).forEach(function(b){b.classList.remove("active")});
+      Array.from(filterBar.querySelectorAll(".search-filter")).forEach(function(b){
+        b.classList.remove("active");
+        b.setAttribute("aria-pressed","false");
+      });
       btn.classList.add("active");
+      btn.setAttribute("aria-pressed","true");
       activeFilter=btn.getAttribute("data-filter");
       runSearch();
     });
@@ -2072,7 +2090,12 @@ async function processContentForExport(html, n, depth, zip){
     try{
       const decoded = await decodedImageFromAsset(originalPath);
       if(decoded){
-        const full = await jpegFromImage(decoded, 1600);
+        // Pas de plafond sur la version "pleine résolution" : ce sont
+        // souvent des diagrammes/algorithmes denses en petit texte, et
+        // c'est justement cette version qui s'affiche dans le zoom (lightbox).
+        // Seule la variante mobile ci-dessous est réduite, pour ne pas
+        // pénaliser la lecture au zoom sur le web.
+        const full = await jpegFromImage(decoded, null);
         zip.file(outPath, full.bytes);
         img.setAttribute("src", prefix + outPath);
         img.setAttribute("data-senorif-image", outPath);
@@ -2356,7 +2379,12 @@ function contentEnhanceScript(){
       var lastFocused=null;
       overlay.addEventListener("click",function(e){ if(e.target===overlay||e.target===closeBtn) closeLightbox(); });
       document.addEventListener("keydown",function(e){
-        if(e.key==="Escape" && overlay.classList.contains("open")) closeLightbox();
+        if(!overlay.classList.contains("open")) return;
+        if(e.key==="Escape"){ closeLightbox(); return; }
+        // Piège à focus : le bouton fermer est le seul élément focalisable
+        // de la boîte de dialogue, donc Tab (dans un sens ou l'autre) doit
+        // toujours y ramener le focus au lieu de sortir vers la page en dessous.
+        if(e.key==="Tab"){ e.preventDefault(); closeBtn.focus(); }
       });
       overlay._open=function(src, sourceEl){
         lastFocused=sourceEl||null;
