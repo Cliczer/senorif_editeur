@@ -73,6 +73,8 @@ textarea{min-height:180px}
 .graph-modal.active{display:grid}
 .graph-header{padding:10px;background:white;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .graph-header strong{color:#2563eb}
+#graphCloseBtn{margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid #ddd;background:#f9fafb;font-size:16px;font-weight:900;color:#374151;cursor:pointer;flex:0 0 auto}
+#graphCloseBtn:hover{background:#fee2e2;border-color:#fca5a5;color:#b91c1c}
 .graph-main{display:grid;grid-template-columns:300px 1fr 330px;min-height:0}
 .graph-panel{background:white;padding:12px;border-right:1px solid #ddd;overflow:auto}
 .graph-panel.right{border-left:1px solid #ddd;border-right:0}
@@ -126,7 +128,6 @@ textarea{min-height:180px}
     <button onclick="gAddResult()">+ Résultat</button>
     <button onclick="gToggleConnect()">Relier deux nœuds</button>
     <button class="primary" onclick="applyGraphToQuestionnaire()">Valider dans la page</button>
-    <button onclick="closeGraphEditor()">Fermer</button>
     <span class="graph-zoom">
       <button onclick="gZoomOut()">−</button>
       <input id="graphZoomSlider" type="range" min="20" max="140" value="100" oninput="gSetZoom(this.value/100)" style="width:130px">
@@ -134,6 +135,7 @@ textarea{min-height:180px}
       <span id="graphZoomValue">100%</span>
       <button onclick="gFitView()">Tout voir</button>
     </span>
+    <button id="graphCloseBtn" type="button" onclick="closeGraphEditor()" title="Fermer (Échap)" aria-label="Fermer l'éditeur graphique">✕</button>
   </div>
 
   <div class="graph-main">
@@ -314,23 +316,21 @@ function esc(s){return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt
 function cleanPath(p){return p.replace(/^\/+/,"").replace(/\\/g,"/")}
 function setStatus(s){$("status").textContent=s}
 
+// Site vide de départ (aucun contenu de démonstration : un "exemple" fictif
+// affiché ici pouvait laisser croire à tort qu'il s'agissait du vrai contenu
+// SENORIF). Utilisé par "Nouveau" et comme filet de sécurité si le
+// chargement automatique du dépôt échoue.
 function defaultData(){
   return {
     titre:"SENORIF interactif",
     sous_titre:"Cancers et pathologies du sein — navigation par chapitres",
-    chapitres:[{
-      id:uid(), titre:"Carcinome in situ (CIS)", slug:"carcinome-in-situ", type:"folder", color:firstColor(), contenu_html:"",
-      enfants:[{
-        id:uid(), titre:"Radiothérapie des carcinomes in situ", slug:"radiotherapie", type:"folder", color:firstColor(), contenu_html:"",
-        enfants:[{id:uid(), titre:"Arbre de décision", slug:"arbre-de-decision", type:"page", color:firstColor(), contenu_html:"<p>Page avec questionnaire.</p>"}]
-      }]
-    }]
+    chapitres:[]
   };
 }
 
 function newProject(){
-  if(confirm("Créer un projet exemple ?")){
-    assets={}; data=defaultData(); selectedId=data.chapitres[0].id; render(); setStatus("Projet exemple chargé.");
+  if(confirm("Créer un nouveau site vide ? Le contenu actuellement chargé dans l'éditeur sera perdu (exporte-le avant si tu veux le garder).")){
+    assets={}; data=defaultData(); selectedId=null; render(); setStatus("Nouveau site vide créé.");
   }
 }
 
@@ -347,7 +347,11 @@ function findNode(id,nodes=data.chapitres,parent=null){
 }
 
 function titleFromSlug(slug){return slug.split("-").map(w=>w?w[0].toUpperCase()+w.slice(1):"").join(" ")}
-function detectColorFromHtml(html){let m=html.match(/--blue\s*:\s*(#[0-9a-fA-F]{6})/)||html.match(/--accent\s*:\s*(#[0-9a-fA-F]{6})/);return m?m[1]:firstColor()}
+// --accent porte la couleur propre à chaque chapitre (voir --content div--
+// dans generatePageAt) ; --blue est désormais une couleur fixe partagée par
+// tout le site (accessibilité), donc on doit la vérifier en second, sinon
+// elle masque systématiquement la vraie couleur du chapitre.
+function detectColorFromHtml(html){let m=html.match(/--accent\s*:\s*(#[0-9a-fA-F]{6})/)||html.match(/--blue\s*:\s*(#[0-9a-fA-F]{6})/);return m?m[1]:firstColor()}
 
 function parseHtmlInfo(html,fallback,isIndex=false){
   const doc=new DOMParser().parseFromString(html,"text/html");
@@ -422,10 +426,19 @@ async function importZip(file){
   }
 
   data=buildDataFromFiles(files);
+  let reordered=false;
+  if(typeof assets["nav-tree.json"]==="string"){
+    try{
+      const navTree=JSON.parse(assets["nav-tree.json"]);
+      data.chapitres=reorderByNavTree(data.chapitres, navTree);
+      reordered=true;
+    }catch(e){ console.warn("nav-tree.json illisible, ordre alphabétique conservé", e); }
+    delete assets["nav-tree.json"];
+  }
   attachQuestionnairesFromAssets();
   selectedId=data.chapitres[0]?.id||null;
   render();
-  setStatus("ZIP importé : plan reconstruit.");
+  setStatus("ZIP importé : plan reconstruit"+(reordered?" (ordre d'origine restauré via nav-tree.json)":"")+".");
 }
 
 function attachQuestionnairesFromAssets(){
@@ -517,14 +530,37 @@ function buildDataFromFiles(files){
   return {titre:"SENORIF interactif",sous_titre:"Cancers et pathologies du sein",chapitres:Object.keys(root.children).sort().map((s,i)=>folder(s,root.children[s],colors[i%colors.length]))};
 }
 
+// Un dossier/zip n'a pas d'ordre garanti (le tri alphabétique de
+// buildDataFromFiles casse l'ordre voulu par l'extraction d'origine).
+// nav-tree.json, régénéré à chaque export, contient l'ordre exact des
+// chapitres/dossiers/pages : on l'utilise pour réordonner l'arbre reconstruit
+// quand il est présent dans le zip importé.
+function reorderByNavTree(nodes, navTreeNodes){
+  if(!navTreeNodes || !navTreeNodes.length || !nodes || !nodes.length) return nodes;
+  const byPath=new Map(nodes.map(n=>[n.original_path, n]));
+  const ordered=[];
+  navTreeNodes.forEach(nt=>{
+    const match=byPath.get(nt.href);
+    if(match){
+      ordered.push(match);
+      byPath.delete(nt.href);
+      if(match.enfants && match.enfants.length && nt.enfants && nt.enfants.length){
+        match.enfants=reorderByNavTree(match.enfants, nt.enfants);
+      }
+    }
+  });
+  byPath.forEach(v=>ordered.push(v));
+  return ordered;
+}
+
 async function autoLoadRepo(manual=false){
   let host=location.hostname;
   if(!host.endsWith("github.io")){
     if(manual) alert("Importe un ZIP si tu n’es pas sur GitHub Pages.");
-    data=defaultData(); selectedId=data.chapitres[0].id; render(); return;
+    data=defaultData(); selectedId=null; render(); return;
   }
   let owner=host.split(".")[0], repo=location.pathname.split("/").filter(Boolean)[0];
-  if(!owner||!repo){data=defaultData(); selectedId=data.chapitres[0].id; render(); return;}
+  if(!owner||!repo){data=defaultData(); selectedId=null; render(); return;}
   setStatus("Chargement automatique du dépôt "+owner+"/"+repo+"...");
   let files={}, assetUrls={};
 
@@ -554,11 +590,20 @@ async function autoLoadRepo(manual=false){
         else assets[p]=new Uint8Array(await(await fetch(u)).arrayBuffer());
       }catch(e){}
     }
+    let reordered=false;
+    if(typeof assets["nav-tree.json"]==="string"){
+      try{
+        const navTree=JSON.parse(assets["nav-tree.json"]);
+        data.chapitres=reorderByNavTree(data.chapitres, navTree);
+        reordered=true;
+      }catch(e){ console.warn("nav-tree.json illisible, ordre alphabétique conservé", e); }
+      delete assets["nav-tree.json"];
+    }
     attachQuestionnairesFromAssets();
-    selectedId=data.chapitres[0]?.id||null; render(); setStatus("Dépôt chargé. HTML : "+Object.keys(files).length);
+    selectedId=data.chapitres[0]?.id||null; render(); setStatus("Dépôt chargé. HTML : "+Object.keys(files).length+(reordered?" (ordre d'origine restauré)":""));
   }catch(e){
     setStatus("Chargement auto impossible : "+e.message+"\\nImporte un ZIP.");
-    data=defaultData(); selectedId=data.chapitres[0].id; render();
+    data=defaultData(); selectedId=null; render();
   }
 }
 
@@ -2554,6 +2599,9 @@ function gTreeToGraph(tree){gNodes=[];gEdges=[];let count=1,cursorX=300;function
 function gGraphToTree(){let targets=new Set(gEdges.map(e=>e.target));let root=gNodes.find(n=>!targets.has(n.id))||gNodes[0];function build(n){if(!n)return{type:"question",titre:"Question",choix:{}};if(n.type==="resultat")return{type:"resultat",titre:n.titre||"Résultat",recommandations:n.recommandations||[],donnees:n.donnees||{},infos_science:n.infos_science||{},source_senorif:n.source_senorif||""};let choix={};gEdges.filter(e=>e.source===n.id).forEach(e=>{let child=gNode(e.target);if(child)choix[e.label||"Réponse"]=build(child)});return{type:"question",titre:n.titre||"Question",aide:n.aide||"",choix,infos_science:n.infos_science||{},source_senorif:n.source_senorif||""}}let tree=build(root);let current=getQuizRoot();if(current&&current.note_boost)tree.note_boost=current.note_boost;return tree}
 function openGraphEditor(){let f=findNode(selectedId); if(!f) return alert("Sélectionne une page ou un dossier."); if(!f.node.questionnaire_json) f.node.questionnaire_json=quizExample(); if(!$("graphModal")) return alert("Éditeur graphique introuvable."); $("graphModal").classList.add("active"); gSetupPan(); gSelectedNode=null; gSelectedEdge=null; gConnectMode=false; gConnectSource=null; gTreeToGraph(f.node.questionnaire_json)}
 function closeGraphEditor(){$("graphModal").classList.remove("active")}
+document.addEventListener("keydown",function(e){
+  if(e.key==="Escape" && $("graphModal") && $("graphModal").classList.contains("active")) closeGraphEditor();
+});
 function applyGraphToQuestionnaire(){let f=findNode(selectedId);if(!f)return;f.node.questionnaire_json=gGraphToTree();selectedQuizPath=[];if($("editQuiz"))$("editQuiz").value=JSON.stringify(f.node.questionnaire_json,null,2);renderQuizVisual();renderTree();renderPreview();gStatus("Arbre validé dans la page.",true);closeGraphEditor()}
 function gResizeWorld(){let w=$("graphWorld");if(!gNodes.length){w.style.width="2500px";w.style.height="1800px";return}w.style.width=Math.max(2500,Math.max(...gNodes.map(n=>n.x))+700)+"px";w.style.height=Math.max(1800,Math.max(...gNodes.map(n=>n.y))+500)+"px"}
 function gRender(){gResizeWorld();let w=$("graphWorld");w.innerHTML="";gEdges.forEach(gRenderEdge);gNodes.forEach(gRenderNode);gRenderList();gRenderEditor();$("graphPreview").value=JSON.stringify(gGraphToTree(),null,2)}
