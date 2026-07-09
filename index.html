@@ -30,6 +30,8 @@ main{overflow:auto;padding:20px}
 .node-btn.selected{background:#e8f1ff;border-color:#bcd2ff;color:#244f9e}
 .badge{font-size:10px;font-weight:900;padding:2px 6px;border-radius:999px;background:#eef2ff;color:#4868a8;margin-left:auto}
 .preview-card{max-width:900px;margin:0 auto;background:white;border-top:10px solid var(--blue);border-radius:22px;box-shadow:0 10px 30px rgba(31,50,90,.08);padding:34px}
+.preview-card.home-mode{max-width:none;background:transparent;border-top:0;box-shadow:none;padding:0}
+.home-preview-frame{width:100%;height:82vh;border:1px solid #e5e7eb;border-radius:16px;background:white}
 .preview-card h1{color:var(--blue);font-size:34px;font-weight:500;margin:0 0 12px}
 .preview-card h2{color:var(--blue);font-size:24px;font-weight:500;margin:0 0 18px}
 .preview-card .list{display:grid;gap:12px;margin-top:18px}
@@ -195,16 +197,13 @@ textarea{min-height:180px}
 <header>
   <strong>Éditeur SENORIF</strong>
   <button onclick="newProject()">Nouveau</button>
-  <button onclick="autoLoadRepo(true)">Recharger dépôt GitHub</button>
-  
-  
   <button onclick="selectedId=null;render()">Aperçu accueil</button>
   <button class="primary" onclick="exportZip()">Exporter ZIP</button>
 </header>
 
 <div class="layout">
 <aside>
-  <div class="help">Importe le ZIP du dépôt ou laisse l’éditeur tenter de charger automatiquement le dépôt GitHub Pages.</div>
+  <div class="help">Importe le ZIP du site existant (ci-dessous) pour éditer son contenu, ou clique "+ Chapitre" pour démarrer de zéro.</div>
   <label>Importer le site existant</label>
   <input type="file" id="importFile" accept=".zip,.json" onchange="importFile(event)">
   <div class="toolbar">
@@ -553,60 +552,6 @@ function reorderByNavTree(nodes, navTreeNodes){
   return ordered;
 }
 
-async function autoLoadRepo(manual=false){
-  let host=location.hostname;
-  if(!host.endsWith("github.io")){
-    if(manual) alert("Importe un ZIP si tu n’es pas sur GitHub Pages.");
-    data=defaultData(); selectedId=null; render(); return;
-  }
-  let owner=host.split(".")[0], repo=location.pathname.split("/").filter(Boolean)[0];
-  if(!owner||!repo){data=defaultData(); selectedId=null; render(); return;}
-  setStatus("Chargement automatique du dépôt "+owner+"/"+repo+"...");
-  let files={}, assetUrls={};
-
-  async function walk(path=""){
-    let r=await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`);
-    if(!r.ok) throw new Error("GitHub API HTTP "+r.status);
-    let arr=await r.json();
-    for(let item of arr){
-      if(item.type==="dir"){
-        if(item.name!==".git") await walk(item.path);
-      }else if(item.type==="file"){
-        let p=item.path, base=p.split("/").pop();
-        if(RESERVED_FILES.has(base)) continue;
-        if(p.toLowerCase().endsWith(".html")) files[p]=await(await fetch(item.download_url)).text();
-        else if(p.includes("/")) assetUrls[p]=item.download_url;
-      }
-    }
-  }
-
-  try{
-    await walk("");
-    data=buildDataFromFiles(files);
-    assets={};
-    for(let [p,u] of Object.entries(assetUrls)){
-      try{
-        if(p.endsWith(".json")) assets[p]=await(await fetch(u)).text();
-        else assets[p]=new Uint8Array(await(await fetch(u)).arrayBuffer());
-      }catch(e){}
-    }
-    let reordered=false;
-    if(typeof assets["nav-tree.json"]==="string"){
-      try{
-        const navTree=JSON.parse(assets["nav-tree.json"]);
-        data.chapitres=reorderByNavTree(data.chapitres, navTree);
-        reordered=true;
-      }catch(e){ console.warn("nav-tree.json illisible, ordre alphabétique conservé", e); }
-      delete assets["nav-tree.json"];
-    }
-    attachQuestionnairesFromAssets();
-    selectedId=data.chapitres[0]?.id||null; render(); setStatus("Dépôt chargé. HTML : "+Object.keys(files).length+(reordered?" (ordre d'origine restauré)":""));
-  }catch(e){
-    setStatus("Chargement auto impossible : "+e.message+"\\nImporte un ZIP.");
-    data=defaultData(); selectedId=null; render();
-  }
-}
-
 function collectNodes(nodes,out){nodes.forEach(n=>{out.push(n); if(n.enfants) collectNodes(n.enfants,out)})}
 
 function renderTree(){
@@ -707,16 +652,6 @@ function updateSelectedContentFromHtml(){
   renderPreview();
 }
 
-function renderHomePreview(){
-  let cards=(data.chapitres||[]).map(ch=>{
-    let items=(ch.enfants||[]).map(c=>`<li><a class="subchapter-btn" href="#" onclick="selectNode('${c.id}');return false"><span class="chev">›</span><span>${esc(c.titre)}</span></a></li>`).join("");
-    return `<details class="chapter" style="--accent:${ch.color||firstColor()}" data-path="${esc(ch.slug||"")}">
-      <summary><span class="summary-title">${esc(ch.titre)}</span><span class="update-date">MAJ : …</span></summary>
-      <div class="panel"><div class="arrow"></div><h2>${esc(ch.titre)}</h2><ul>${items}</ul></div>
-    </details>`;
-  }).join("");
-  return `<div class="site-preview"><header><h1>${esc(data.titre||"SENORIF interactif")}</h1><p class="subtitle">${esc(data.sous_titre||"Cancers et pathologies du sein")}</p></header><div class="grid">${cards}</div></div>`;
-}
 
 function renderQuizPreviewButton(n){
   return n.questionnaire_json ? `<button class="test-btn" type="button" onclick="previewStartQuiz()">Faire un test</button><div id="previewQuiz" class="quiz"></div>` : "";
@@ -746,7 +681,19 @@ function previewStartQuiz(){
 
 function renderPreview(){
   let f=selectedId?findNode(selectedId):null,p=$("preview");
-  if(!f){p.className="preview-card home-mode";p.innerHTML=renderHomePreview();return}
+  if(!f){
+    // Aperçu fidèle : on affiche le VRAI HTML/CSS généré pour la page
+    // d'accueil du site (recherche, boutons, etc. inclus), pas une
+    // reconstitution à la main qui finit toujours par diverger du vrai site.
+    p.className="preview-card home-mode";
+    p.innerHTML="";
+    let iframe=document.createElement("iframe");
+    iframe.className="home-preview-frame";
+    iframe.title="Aperçu de la page d'accueil du site";
+    p.appendChild(iframe);
+    iframe.srcdoc=generateHome();
+    return;
+  }
   p.className="preview-card";
   let n=f.node, body=storedHtmlToPreviewHtml(n.contenu_html||"",n);
   p.style.borderTopColor=n.color||firstColor(); p.style.setProperty("--blue",n.color||firstColor());
@@ -2624,7 +2571,13 @@ function gConnectClick(id){if(!gConnectSource){gConnectSource=id;gStatus("Parent
 function gSetZoom(z){gZoom=Math.max(0.2,Math.min(1.4,z));$("graphWorld").style.transform="scale("+gZoom+")";$("graphZoomSlider").value=Math.round(gZoom*100);$("graphZoomValue").textContent=Math.round(gZoom*100)+"%"}function gZoomIn(){gSetZoom(gZoom+0.1)}function gZoomOut(){gSetZoom(gZoom-0.1)}
 function gFitView(){gSetupPan();if(!gNodes.length)return;let canvas=$("graphCanvas"),minX=Math.min(...gNodes.map(n=>n.x)),maxX=Math.max(...gNodes.map(n=>n.x+G_NODE_W)),minY=Math.min(...gNodes.map(n=>n.y)),maxY=Math.max(...gNodes.map(n=>n.y+G_NODE_H)),treeW=maxX-minX+300,treeH=maxY-minY+300,z=Math.min(canvas.clientWidth/treeW,canvas.clientHeight/treeH,1);gSetZoom(Math.max(0.2,z));canvas.scrollLeft=Math.max(0,(minX-150)*gZoom);canvas.scrollTop=Math.max(0,(minY-120)*gZoom)}
 function gCenterOnNode(id){let n=gNode(id);if(!n)return;let canvas=$("graphCanvas");canvas.scrollLeft=Math.max(0,(n.x-300)*gZoom);canvas.scrollTop=Math.max(0,(n.y-200)*gZoom)}
-autoLoadRepo(false);
+// Aucun chargement automatique au démarrage : on part d'un site vide tant
+// que l'utilisateur n'a pas explicitement importé un ZIP (auparavant
+// l'éditeur essayait silencieusement de recharger le contenu HTML présent
+// dans SON PROPRE dépôt GitHub — du contenu de test obsolète y traînait,
+// ce qui donnait l'impression que des données apparaissaient toutes seules).
+data=defaultData();
+render();
 </script>
 </body>
 </html>
