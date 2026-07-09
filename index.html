@@ -19,7 +19,7 @@ button:hover{background:#eef5ff}
 aside,.right{background:white;overflow:auto;padding:14px}
 aside{border-right:1px solid var(--border)}
 .right{border-left:1px solid var(--border)}
-main{overflow:auto;padding:20px}
+main{overflow:auto;padding:20px;min-width:0}
 .help{background:#f9fafb;border:1px solid var(--border);border-radius:12px;padding:12px;color:var(--muted);font-size:13px;line-height:1.45;margin-bottom:12px}
 .toolbar{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
 .small{font-size:12px;padding:6px 9px}
@@ -45,11 +45,17 @@ textarea{min-height:180px}
 .status{margin-top:10px;font-size:13px;color:var(--muted);white-space:pre-wrap}
 .richbar{display:flex;gap:6px;flex-wrap:wrap;padding:8px;background:#f9fafb;border:1px solid var(--border);border-radius:12px 12px 0 0}
 .richbar button{padding:7px 10px;border-radius:8px}
+.richbar-color{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:8px;background:white;border:1px solid var(--border);cursor:pointer;font-size:14px}
+.richbar-color input[type=color]{width:26px;height:26px;padding:0;border:0;border-radius:6px;cursor:pointer;background:none}
+.color-row{display:flex;align-items:center;gap:8px}
+.color-row select{flex:1 1 auto;min-width:0}
+.color-row input[type=color]{width:34px;height:34px;padding:0;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:none;flex:0 0 auto}
 .editorbox{min-height:260px;border:1px solid var(--border);border-top:0;border-radius:0 0 12px 12px;padding:14px;background:white;line-height:1.65;overflow:auto;font-size:16px}.editorbox p,.editorbox div,.editorbox li,.editorbox span{font-size:16px;line-height:1.65}
 .editorbox:focus{outline:2px solid rgba(76,120,184,.25)}
-.editorbox table,.preview-card table{width:100%;border-collapse:collapse;margin:18px 0;font-size:16px}
+.editorbox table,.preview-card table{width:100%;max-width:100%;border-collapse:collapse;margin:18px 0;font-size:16px;display:block;overflow-x:auto}
 .editorbox th,.editorbox td,.preview-card th,.preview-card td{border:1px solid #6b7280;padding:8px 10px;vertical-align:top;font-size:16px;line-height:1.45}
 .editorbox th,.preview-card th{font-weight:900;background:#f8fafc}
+.editorbox img,.preview-card img{max-width:100%;height:auto}
 .editorbox table.selected-table{outline:3px solid rgba(76,120,184,.35)}
 .table-tools{display:none;gap:6px;flex-wrap:wrap;padding:8px;margin:0 0 8px;background:#f9fafb;border:1px solid var(--border);border-radius:10px}
 .table-tools.active{display:flex}
@@ -236,7 +242,10 @@ textarea{min-height:180px}
     <input id="editSlug" oninput="updateSelectedMeta()">
 
     <label>Couleur</label>
-    <select id="editColor" onchange="updateSelectedMeta()"></select>
+    <div class="color-row">
+      <select id="editColor" onchange="updateSelectedMeta()"></select>
+      <input type="color" id="editColorCustom" title="Couleur personnalisée" oninput="applyCustomColor(this.value)">
+    </div>
 
     <div class="toolbar">
       <button onclick="moveSelected(-1)">↑ Monter</button>
@@ -257,6 +266,8 @@ textarea{min-height:180px}
         <button type="button" onclick="cmd('insertUnorderedList')">• Liste</button>
         <button type="button" onclick="cmd('insertOrderedList')">1. Liste</button>
         <button type="button" onclick="makeHeading()">Titre</button>
+        <label class="richbar-color" title="Couleur du texte sélectionné">🎨 Couleur<input type="color" id="textColorPicker" value="#c0392b" oninput="setTextColor(this.value)"></label>
+        <button type="button" onclick="clearTextColor()">Effacer couleur</button>
         <button type="button" onclick="insertImage()">Image</button><button type="button" onclick="insertTable()">Tableau</button>
       </div>
       <div id="tableTools" class="table-tools">
@@ -585,6 +596,28 @@ function fillColorSelect(selected){
     opt.selected=(c.toUpperCase()===selected);
     sel.appendChild(opt);
   });
+  // Couleur hors palette fixe (choisie via le sélecteur de couleur libre,
+  // ou récupérée telle quelle d'un site réimporté) : on l'ajoute comme
+  // option à part pour qu'elle reste visible/sélectionnée au lieu de
+  // silencieusement retomber sur la première couleur de la liste.
+  if(!SENORIF_COLORS.some(c=>c.toUpperCase()===selected)){
+    let opt=document.createElement("option");
+    opt.value=selected;
+    opt.textContent="Personnalisée — "+selected;
+    opt.style.background=selected;
+    opt.style.color="#fff";
+    opt.selected=true;
+    sel.appendChild(opt);
+  }
+  let custom=$("editColorCustom");
+  if(custom) custom.value=selected;
+}
+
+function applyCustomColor(value){
+  let f=findNode(selectedId); if(!f) return;
+  f.node.color=value.toUpperCase();
+  fillColorSelect(f.node.color);
+  renderTree(); renderPreview();
 }
 
 function firstColor(){return SENORIF_COLORS[0]||"#5570AE"}
@@ -1030,6 +1063,17 @@ function showEditorMode(mode){
 
 function cmd(c){document.execCommand(c,false,null); $("richContent").focus(); updateSelectedContentFromRich()}
 function makeHeading(){document.execCommand("formatBlock",false,"h2"); $("richContent").focus(); updateSelectedContentFromRich()}
+
+function setTextColor(color){
+  $("richContent").focus();
+  document.execCommand("foreColor",false,color);
+  updateSelectedContentFromRich();
+}
+function clearTextColor(){
+  $("richContent").focus();
+  document.execCommand("foreColor",false,"inherit");
+  updateSelectedContentFromRich();
+}
 
 
 let currentTable=null;
