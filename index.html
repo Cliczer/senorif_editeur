@@ -269,6 +269,8 @@ textarea{min-height:180px}
 
     <textarea id="editContent" class="hidden" oninput="updateSelectedContentFromHtml()"></textarea>
 
+    <button type="button" id="addQuizBtn" class="primary hidden" onclick="addQuestionnaire()">+ Ajouter un questionnaire à cette page</button>
+
     <div id="questionnairePanel" class="qbox hidden">
       <h3>Questionnaire</h3><button type="button" class="primary" onclick="openGraphEditor()">Ouvrir l’éditeur graphique d’arbre</button>
       <div class="help">
@@ -611,11 +613,13 @@ function renderEditor(){
   $("editContent").value=storedHtmlToExportHtml(n.contenu_html||"",n);
   if(n.questionnaire_json){
     $("questionnairePanel").classList.remove("hidden");
+    $("addQuizBtn").classList.add("hidden");
     $("editQuiz").value=JSON.stringify(n.questionnaire_json,null,2);
     selectedQuizPath=[];
     renderQuizVisual();
   }else{
     $("questionnairePanel").classList.add("hidden");
+    $("addQuizBtn").classList.remove("hidden");
     $("editQuiz").value="";
     selectedQuizPath=[];
   }
@@ -764,7 +768,23 @@ function insertQuizExample(){
   f.node.questionnaire_json=quizExample();
   selectedQuizPath=[];
   renderQuizVisual();
-  renderTree(); 
+  renderTree();
+  renderPreview();
+}
+
+// Point d'entrée unique pour créer le tout premier questionnaire d'une page :
+// le panneau questionnaire (JSON, éditeur graphique, exemple...) reste caché
+// tant qu'aucun questionnaire_json n'existe, donc ce bouton (toujours visible)
+// crée un questionnaire d'exemple puis affiche le panneau pour le personnaliser.
+function addQuestionnaire(){
+  let f=findNode(selectedId); if(!f) return;
+  f.node.questionnaire_json=quizExample();
+  $("questionnairePanel").classList.remove("hidden");
+  $("addQuizBtn").classList.add("hidden");
+  $("editQuiz").value=JSON.stringify(f.node.questionnaire_json,null,2);
+  selectedQuizPath=[];
+  renderQuizVisual();
+  renderTree();
   renderPreview();
 }
 
@@ -824,36 +844,15 @@ function getQuizParentInfo(){
   return {parent,label,parentPath};
 }
 
+// Remarque : cette fonction ne pilote que le textarea JSON (editQuiz).
+// L'ancien éditeur visuel en arbre linéaire (quizTree/quizNotes/quizEditor)
+// référençait des éléments qui n'ont jamais existé dans le HTML — code mort
+// d'une version antérieure, remplacée depuis par l'éditeur graphique
+// (openGraphEditor / graphModal), qui reste le seul éditeur visuel réel.
 function renderQuizVisual(){
   let root=getQuizRoot();
   if(!root) return;
-  $("editQuiz").value=JSON.stringify(root,null,2);
-  $("quizNotes").value=(root.note_boost||[]).join("\\n");
-
-  let tree=$("quizTree");
-  tree.innerHTML="";
-  function walk(node,path,level){
-    let div=document.createElement("div");
-    div.className="qnode "+(node.type==="resultat"?"qresult":"qquestion")+(JSON.stringify(path)===JSON.stringify(selectedQuizPath)?" selected":"");
-    div.style.marginLeft=(level*14)+"px";
-    div.innerHTML="<b>"+esc(node.type==="resultat"?"✅ Résultat":"❓ Question")+"</b> — "+esc(node.titre||"Sans titre")+"<small>"+esc(path.length?path.join(" › "):"début")+"</small>";
-    div.onclick=function(){selectedQuizPath=path.slice(); renderQuizVisual();};
-    tree.appendChild(div);
-    if(node.type!=="resultat" && node.choix){
-      Object.keys(node.choix).forEach(label=>{
-        let child=node.choix[label];
-        let line=document.createElement("div");
-        line.style.marginLeft=(level*14+18)+"px";
-        line.style.fontSize="12px";
-        line.style.color="#6b7280";
-        line.textContent="↳ "+label;
-        tree.appendChild(line);
-        walk(child,path.concat(label),level+1);
-      });
-    }
-  }
-  walk(root,[],0);
-  renderQuizNodeEditor();
+  if($("editQuiz")) $("editQuiz").value=JSON.stringify(root,null,2);
 }
 
 function renderQuizNodeEditor(){
