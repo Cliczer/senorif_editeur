@@ -691,6 +691,21 @@ function renderPreview(){
     iframe.className="home-preview-frame";
     iframe.title="Aperçu de la page d'accueil du site";
     p.appendChild(iframe);
+    iframe.addEventListener("load",function(){
+      // C'est un aperçu, pas un vrai site publié : les liens internes
+      // (vers d'autres pages du site) n'existent nulle part ici et
+      // provoqueraient une 404. On les neutralise ; seuls les liens externes
+      // (ex. le PDF SENORIF) restent cliquables.
+      try{
+        iframe.contentDocument.querySelectorAll("a[href]").forEach(function(a){
+          let href=a.getAttribute("href")||"";
+          if(!/^([a-z]+:)?\/\//i.test(href) && !href.startsWith("mailto:")){
+            a.addEventListener("click",function(e){ e.preventDefault(); });
+            a.style.cursor="default";
+          }
+        });
+      }catch(e){}
+    });
     iframe.srcdoc=generateHome();
     return;
   }
