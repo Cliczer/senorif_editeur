@@ -28,6 +28,8 @@ main{overflow:auto;padding:20px;min-width:0}
 .node-btn{width:100%;text-align:left;border:1px solid transparent;background:transparent;padding:7px 8px;border-radius:8px;font-weight:700;display:flex;gap:6px;align-items:center}
 .node-btn:hover{background:#f3f6fb}
 .node-btn.selected{background:#e8f1ff;border-color:#bcd2ff;color:#244f9e}
+.tree-toggle{flex:0 0 auto;width:14px;text-align:center;color:#8290a8;font-size:11px}
+.tree-toggle-spacer{visibility:hidden}
 .badge{font-size:10px;font-weight:900;padding:2px 6px;border-radius:999px;background:#eef2ff;color:#4868a8;margin-left:auto}
 .preview-card{max-width:900px;margin:0 auto;background:white;border-top:10px solid var(--blue);border-radius:22px;box-shadow:0 10px 30px rgba(31,50,90,.08);padding:34px}
 .preview-card.home-mode{max-width:none;background:transparent;border-top:0;box-shadow:none;padding:0}
@@ -238,7 +240,7 @@ textarea{min-height:180px}
     <label>Titre</label>
     <input id="editTitle" oninput="updateSelectedMeta()">
 
-    <label>Slug / nom du fichier ou dossier</label>
+    <label>Nom du fichier ou dossier</label>
     <input id="editSlug" oninput="updateSelectedMeta()">
 
     <label>Couleur</label>
@@ -246,6 +248,7 @@ textarea{min-height:180px}
       <select id="editColor" onchange="updateSelectedMeta()"></select>
       <input type="color" id="editColorCustom" title="Couleur personnalisée" oninput="applyCustomColor(this.value)">
     </div>
+    <input id="editColorName" placeholder="Nom de cette couleur personnalisée (optionnel)" oninput="renameCustomColor(this.value)">
 
     <div class="toolbar">
       <button onclick="moveSelected(-1)">↑ Monter</button>
@@ -313,6 +316,8 @@ textarea{min-height:180px}
 
 <script>
 let data=null, selectedId=null, assets={}, suppress=false, savedImageRange=null, blobUrls={}, blobPathByUrl={}, selectedQuizPath=[];
+let collapsedIds=new Set();
+const CUSTOM_COLOR_NAMES={};
 let EXPORT_NAV_TREE=[], EXPORT_NAV_INFO=new Map();
 const RESERVED_DIRS=new Set(["images","image","img","questionnaires","questionnaire","assets","css","js"]);
 const RESERVED_FILES=new Set(["editeur.html","index-editeur.html","senorif-data.json"]);
@@ -649,8 +654,11 @@ function renderTree(){
     nodes.forEach(n=>{
       let icon=n.type==="page"?"📄":"📁";
       let q=n.questionnaire_json?" 🧭":"";
-      h+=`<li><button class="node-btn ${selectedId===n.id?"selected":""}" onclick="selectNode('${n.id}')"><span>${icon}</span><span>${esc(n.titre)}${q}</span><span class="badge">${n.type}</span></button>`;
-      if(n.enfants?.length) h+=branch(n.enfants);
+      let hasChildren=!!(n.enfants&&n.enfants.length);
+      let isCollapsed=collapsedIds.has(n.id);
+      let toggle=hasChildren?`<span class="tree-toggle">${isCollapsed?"▸":"▾"}</span>`:`<span class="tree-toggle tree-toggle-spacer"></span>`;
+      h+=`<li><button class="node-btn ${selectedId===n.id?"selected":""}" onclick="selectNode('${n.id}')">${toggle}<span>${icon}</span><span>${esc(n.titre)}${q}</span><span class="badge">${n.type}</span></button>`;
+      if(hasChildren && !isCollapsed) h+=branch(n.enfants);
       h+="</li>";
     });
     return h+"</ul>";
@@ -658,7 +666,16 @@ function renderTree(){
   $("tree").innerHTML=branch(data.chapitres);
 }
 
-function selectNode(id){selectedId=id; render()}
+// Cliquer sur un chapitre/dossier le sélectionne (pour l'éditer à droite) et
+// replie/déplie ses enfants dans l'arbre, pour pouvoir gérer l'arborescence
+// sans que la liste ne s'étale sur des dizaines de lignes.
+function selectNode(id){
+  let f=findNode(id);
+  if(f && f.node.enfants && f.node.enfants.length){
+    if(collapsedIds.has(id)) collapsedIds.delete(id); else collapsedIds.add(id);
+  }
+  selectedId=id; render();
+}
 
 
 function fillColorSelect(selected){
@@ -678,10 +695,11 @@ function fillColorSelect(selected){
   // ou récupérée telle quelle d'un site réimporté) : on l'ajoute comme
   // option à part pour qu'elle reste visible/sélectionnée au lieu de
   // silencieusement retomber sur la première couleur de la liste.
-  if(!SENORIF_COLORS.some(c=>c.toUpperCase()===selected)){
+  let isCustom=!SENORIF_COLORS.some(c=>c.toUpperCase()===selected);
+  if(isCustom){
     let opt=document.createElement("option");
     opt.value=selected;
-    opt.textContent="Personnalisée — "+selected;
+    opt.textContent=(CUSTOM_COLOR_NAMES[selected]||"Personnalisée")+" — "+selected;
     opt.style.background=selected;
     opt.style.color="#fff";
     opt.selected=true;
@@ -689,6 +707,12 @@ function fillColorSelect(selected){
   }
   let custom=$("editColorCustom");
   if(custom) custom.value=selected;
+  let nameField=$("editColorName");
+  if(nameField){
+    nameField.disabled=!isCustom;
+    nameField.value=isCustom?(CUSTOM_COLOR_NAMES[selected]||""):"";
+    nameField.placeholder=isCustom?"Nom de cette couleur personnalisée (optionnel)":"(couleurs de la palette déjà nommées)";
+  }
 }
 
 function applyCustomColor(value){
@@ -696,6 +720,18 @@ function applyCustomColor(value){
   f.node.color=value.toUpperCase();
   fillColorSelect(f.node.color);
   renderTree(); renderPreview();
+}
+
+// Donne un nom lisible à une couleur personnalisée (hors palette fixe), pour
+// qu'elle apparaisse ensuite dans la liste comme "Mon nom — #HEX" au lieu de
+// juste "Personnalisée — #HEX".
+function renameCustomColor(name){
+  let f=findNode(selectedId); if(!f) return;
+  let hex=(f.node.color||"").toUpperCase();
+  if(!hex || SENORIF_COLORS.some(c=>c.toUpperCase()===hex)) return;
+  if(name && name.trim()) CUSTOM_COLOR_NAMES[hex]=name.trim();
+  else delete CUSTOM_COLOR_NAMES[hex];
+  fillColorSelect(hex);
 }
 
 function firstColor(){return SENORIF_COLORS[0]||"#5570AE"}
