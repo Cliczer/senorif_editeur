@@ -446,9 +446,71 @@ async function importZip(file){
     delete assets["nav-tree.json"];
   }
   attachQuestionnairesFromAssets();
+  attachTablesFromAssets();
   selectedId=data.chapitres[0]?.id||null;
   render();
   setStatus("ZIP importé : plan reconstruit"+(reordered?" (ordre d'origine restauré via nav-tree.json)":"")+".");
+}
+
+// En réimportant un site déjà exporté, chaque tableau n'est plus qu'un
+// <div data-file="tableaux/xxx.json"> vide dans le HTML (le contenu réel vit
+// dans un fichier JSON séparé, chargé par le JS de la page au moment de
+// l'affichage) : sans cette étape, le tableau disparaît silencieusement dès
+// qu'on ré-exporte, puisque plus aucun <table> n'existe dans contenu_html.
+function attachTablesFromAssets(){
+  let all=[]; collectNodes(data.chapitres,all);
+
+  function readJsonAsset(path){
+    if(!assets[path]) return null;
+    try{
+      return typeof assets[path]==="string" ? JSON.parse(assets[path]) : JSON.parse(new TextDecoder().decode(assets[path]));
+    }catch(e){
+      console.warn("JSON illisible :", path, e);
+      return null;
+    }
+  }
+
+  function normPath(baseDir, relPath){
+    if(!relPath) return "";
+    if(relPath.startsWith("/")) return relPath.replace(/^\/+/,"");
+    let parts=(baseDir ? baseDir.split("/") : []).filter(Boolean);
+    relPath.split("/").forEach(part=>{
+      if(!part || part===".") return;
+      if(part==="..") parts.pop();
+      else parts.push(part);
+    });
+    return parts.join("/");
+  }
+
+  all.forEach(n=>{
+    if(!n.contenu_html || !n.contenu_html.includes("data-file")) return;
+    const dir=(n.original_path||"").split("/").slice(0,-1).join("/");
+    const div=document.createElement("div");
+    div.innerHTML=n.contenu_html;
+    let changed=false;
+    div.querySelectorAll("[data-file]").forEach(holder=>{
+      const raw=holder.getAttribute("data-file")||"";
+      if(!/tableaux\//i.test(raw)) return;
+      let json=readJsonAsset(normPath(dir,raw)) || readJsonAsset(raw.replace(/^(\.\.\/)+/,""));
+      if(!json) return;
+      const table=document.createElement("table");
+      const tbody=document.createElement("tbody");
+      if(json.colonnes && json.colonnes.length){
+        const tr=document.createElement("tr");
+        json.colonnes.forEach(c=>{ const th=document.createElement("th"); th.textContent=c; tr.appendChild(th); });
+        tbody.appendChild(tr);
+      }
+      (json.lignes||[]).forEach(row=>{
+        const tr=document.createElement("tr");
+        row.forEach(c=>{ const td=document.createElement("td"); td.textContent=c; tr.appendChild(td); });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      holder.replaceWith(table);
+      changed=true;
+    });
+    if(changed) n.contenu_html=div.innerHTML;
+  });
 }
 
 function attachQuestionnairesFromAssets(){
@@ -1750,8 +1812,11 @@ h1{color:#3f6aa8;font-size:clamp(34px,5vw,58px);font-weight:900}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.chapter summary{font-size:20px;min-height:112px}}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.chapter summary{min-height:92px}.panel h2{font-size:24px}.subchapter-btn{font-size:16px}}
 .search-wrap{max-width:760px;margin:22px auto 28px;position:relative}
+.search-box-row{display:flex;gap:8px;align-items:stretch}
 .search-box{width:100%;border:1px solid rgba(85,112,174,.28);border-radius:999px;padding:14px 18px;font-size:16px;color:var(--text);outline:none;box-shadow:0 3px 12px rgba(31,50,90,.06)}
 .search-box:focus{border-color:#5570AE;box-shadow:0 0 0 4px rgba(85,112,174,.13)}
+.search-go-btn{flex:0 0 auto;width:52px;border:0;border-radius:50%;background:#3f6aa8;color:white;font-size:19px;cursor:pointer;box-shadow:0 3px 10px rgba(31,50,90,.16)}
+.search-go-btn:hover{background:#335686}
 .search-filters{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
 .search-filter{border:1px solid rgba(85,112,174,.28);background:white;color:#3f6aa8;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer}
 .search-filter:hover{background:#eef3fb}
@@ -1766,7 +1831,20 @@ h1{color:#3f6aa8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .search-result-snippet{font-size:13px;color:#455066;line-height:1.4}
 .search-result-snippet mark{background:#fff3a3;padding:0 2px;border-radius:3px}
 .search-empty{padding:12px 14px;color:#617086;font-size:14px}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}`}
+.search-see-all{display:block;text-align:center;padding:12px 14px;margin-top:4px;border-top:1px solid #eef1f7;color:#3f6aa8;font-weight:800;font-size:14px;text-decoration:none}
+.search-see-all:hover{text-decoration:underline}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.search-page-main{max-width:900px;margin:0 auto;padding:0 8px}
+.search-page-summary{color:#617086;font-size:14px;margin:16px 0 20px;padding-left:4px}
+.search-page-results{display:flex;flex-direction:column;gap:12px}
+.search-page-result{display:block;background:white;border:1px solid var(--border, #e5e7eb);border-radius:16px;padding:18px 20px;text-decoration:none;color:inherit;box-shadow:0 3px 10px rgba(31,50,90,.05)}
+.search-page-result:hover{border-color:#3f6aa8;box-shadow:0 6px 16px rgba(31,50,90,.1)}
+.search-page-result .search-result-title{font-weight:900;color:#3f6aa8;margin-bottom:4px;font-size:17px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.search-page-result .search-result-path{font-size:12px;font-weight:700;color:#617086;margin-bottom:7px}
+.search-page-result .search-result-snippet{font-size:14px;color:#455066;line-height:1.5}
+.search-page-result .search-result-snippet mark{background:#fff3a3;padding:0 2px;border-radius:3px}
+.back-home-link{display:inline-block;margin:0 0 18px;color:#3f6aa8;font-weight:800;text-decoration:none}
+.back-home-link:hover{text-decoration:underline}`}
 
 // Classement par spécialité (dossiers/chapitres). "dossier" omis = tout le chapitre.
 const SPECIALTY_MAP=[
@@ -1853,6 +1931,141 @@ function hrefForHome(ch,c){
   return ch.slug+"/"+(c.type==="folder" ? c.slug+"/index.html" : c.slug+".html");
 }
 
+// Page de résultats de recherche à part entière (liée depuis la loupe 🔎 de
+// l'accueil) : contrairement au menu déroulant de l'accueil (limité à 8
+// résultats pour rester compact), cette page affiche TOUS les résultats.
+// Reprend volontairement sa propre copie de la logique de recherche
+// (recherche multi-mots, pas juste une correspondance exacte type Ctrl+F)
+// pour rester une page autonome, sans dépendre du DOM de l'accueil.
+function generateSearchPage(){
+  return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Recherche — ${esc(data.titre)}</title>${siteHeadExtras("Recherche dans "+data.titre+".")}<style>${homeCss()}</style></head><body><div class="wrapper"><header>
+<div class="header-top">
+<div class="header-title"><h1>${esc(data.titre)}</h1><p class="subtitle"><a href="index.html" class="back-home-link">← Retour à l'accueil</a></p></div>
+</div>
+</header>
+<div class="search-wrap">
+<div class="search-box-row">
+<input autocomplete="off" class="search-box" id="siteSearch" placeholder="Rechercher un ou plusieurs mots-clés…" type="search">
+</div>
+<div class="search-filters" id="searchFilters">
+<button type="button" class="search-filter active" data-filter="all" aria-pressed="true">Tout</button>
+<button type="button" class="search-filter" data-filter="image" aria-pressed="false">🖼️ Images</button>
+<button type="button" class="search-filter" data-filter="table" aria-pressed="false">📊 Tableaux</button>
+</div>
+</div>
+<main class="search-page-main">
+<div class="search-page-summary" id="searchPageSummary"></div>
+<div class="search-page-results" id="searchPageResults"></div>
+</main>
+</div>
+<script>(function(){
+  function norm(v){return String(v||"").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")}
+  function escS(v){return String(v||"").replace(/[&<>"']/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#039;"}[m]})}
+  function tokenize(q){return norm(q).split(/\\s+/).filter(Boolean)}
+  const box=document.getElementById("siteSearch");
+  const filterBar=document.getElementById("searchFilters");
+  const summary=document.getElementById("searchPageSummary");
+  const list=document.getElementById("searchPageResults");
+  const params=new URLSearchParams(location.search);
+  let activeFilter=params.get("f")||"all";
+  function snippetAround(text, normText, tokens){
+    let i=-1;
+    tokens.forEach(function(t){ const p=normText.indexOf(t); if(p>=0 && (i<0||p<i)) i=p; });
+    if(i<0) return "";
+    const start=Math.max(0, i-70), end=Math.min(text.length, i+110);
+    return (start>0?"… ":"") + text.slice(start,end).trim() + (end<text.length?" …":"");
+  }
+  function highlightSnippet(snipHtml, tokens){
+    if(!tokens.length) return snipHtml;
+    const re=new RegExp("("+tokens.map(function(t){return t.replace(/[.*+?^\${}()|[\]\\]/g,"\\$&")}).join("|")+")","gi");
+    return snipHtml.replace(re,"<mark>$1</mark>");
+  }
+  function matchesFilter(x){
+    if(activeFilter==="image") return !!x.img;
+    if(activeFilter==="table") return !!x.tab;
+    return true;
+  }
+  function badgesFor(x){
+    let h="";
+    if(x.img) h+='<span class="result-badge">🖼️ Image</span>';
+    if(x.tab) h+='<span class="result-badge">📊 Tableau</span>';
+    return h;
+  }
+  function scoreEntry(x,tokens){
+    let score=0;
+    const nt=x._normTitle, full=tokens.join(" ");
+    if(nt===full) score+=1000;
+    else if(nt.indexOf(full)===0) score+=500;
+    else if(nt.includes(full)) score+=300;
+    tokens.forEach(function(t){
+      if(nt.includes(t)) score+=150;
+      const idx=x._normText.indexOf(t);
+      if(idx>=0){
+        score+=Math.max(0,40-Math.floor(idx/20));
+        let count=0,pos=0;
+        while((pos=x._normText.indexOf(t,pos))!==-1){count++;pos+=t.length}
+        score+=Math.min(count,10)*2;
+      }
+    });
+    return score;
+  }
+  let index=[];
+  fetch("search-index.json").then(r=>r.ok?r.json():[]).then(function(d){
+    index=(Array.isArray(d)?d:[]).map(function(x){
+      x._normText=norm(x.text);
+      x._normTitle=norm(x.title);
+      return x;
+    });
+    runSearch();
+  }).catch(function(){index=[]});
+  function runSearch(){
+    const rawQ=box.value.trim();
+    const tokens=tokenize(rawQ);
+    if(!tokens.length){
+      list.innerHTML="";
+      summary.textContent="Tape un ou plusieurs mots-clés pour lancer la recherche.";
+      return;
+    }
+    let found=index.filter(function(x){
+      return tokens.every(function(t){return x._normText.includes(t)}) && matchesFilter(x);
+    });
+    found=found.map(function(x){return {x:x,s:scoreEntry(x,tokens)}}).sort(function(a,b){return b.s-a.s}).map(function(p){return p.x});
+    summary.textContent = found.length
+      ? found.length+" résultat"+(found.length>1?"s":"")+" pour « "+rawQ+" »"
+      : "Aucun résultat pour « "+rawQ+" ».";
+    list.innerHTML=found.map(function(x){
+      const snip=snippetAround(x.text, x._normText, tokens);
+      const hrefWithHl=x.href+(x.href.includes("?")?"&":"?")+"hl="+encodeURIComponent(rawQ);
+      let snipHtml=highlightSnippet(escS(snip), tokens);
+      return '<a class="search-page-result" href="'+escS(hrefWithHl)+'"><div class="search-result-title">'+escS(x.title)+badgesFor(x)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div>'
+        +(snip?'<div class="search-result-snippet">'+snipHtml+'</div>':'')+'</a>';
+    }).join("");
+  }
+  box.addEventListener("input",runSearch);
+  if(filterBar){
+    Array.from(filterBar.querySelectorAll(".search-filter")).forEach(function(b){
+      const isActive=b.getAttribute("data-filter")===activeFilter;
+      b.classList.toggle("active",isActive);
+      b.setAttribute("aria-pressed",isActive?"true":"false");
+    });
+    filterBar.addEventListener("click",function(e){
+      const btn=e.target.closest(".search-filter");
+      if(!btn)return;
+      Array.from(filterBar.querySelectorAll(".search-filter")).forEach(function(b){
+        b.classList.remove("active");
+        b.setAttribute("aria-pressed","false");
+      });
+      btn.classList.add("active");
+      btn.setAttribute("aria-pressed","true");
+      activeFilter=btn.getAttribute("data-filter");
+      runSearch();
+    });
+  }
+  if(params.get("q")){ box.value=params.get("q"); }
+})();<\/script>
+</body></html>`;
+}
+
 // Regroupement visuel de la page d'accueil en 4 grands thèmes (fond de
 // couleur par thème), d'après la maquette PowerPoint fournie. Un chapitre
 // ajouté plus tard et absent de cette liste atterrit dans une zone "Autres"
@@ -1896,7 +2109,13 @@ function generateHome(){
 </div>
 </header>
 <div class="search-wrap">
-<input autocomplete="off" class="search-box" id="siteSearch" placeholder="Rechercher un mot-clé…" type="search">
+<form id="searchForm" action="recherche.html" role="search">
+<div class="search-box-row">
+<input autocomplete="off" class="search-box" id="siteSearch" name="q" placeholder="Rechercher un ou plusieurs mots-clés…" type="search">
+<input type="hidden" id="searchFilterHidden" name="f" value="all">
+<button type="submit" class="search-go-btn" aria-label="Voir tous les résultats">🔎</button>
+</div>
+</form>
 <div class="search-filters" id="searchFilters">
 <button type="button" class="search-filter active" data-filter="all" aria-pressed="true">Tout</button>
 <button type="button" class="search-filter" data-filter="image" aria-pressed="false">🖼️ Images</button>
@@ -1910,17 +2129,26 @@ function generateHome(){
 <script>(function(){
   function norm(v){return String(v||"").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")}
   function escS(v){return String(v||"").replace(/[&<>"']/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#039;"}[m]})}
+  function tokenize(q){return norm(q).split(/\\s+/).filter(Boolean)}
   const box=document.getElementById("siteSearch");
   const results=document.getElementById("searchResults");
   const filterBar=document.getElementById("searchFilters");
+  const filterHidden=document.getElementById("searchFilterHidden");
   const status=document.getElementById("searchStatus");
   if(!box||!results)return;
   let activeFilter="all";
-  function snippetAround(text, normText, q){
-    const i=normText.indexOf(q);
+  const PREVIEW_CAP=8;
+  function snippetAround(text, normText, tokens){
+    let i=-1;
+    tokens.forEach(function(t){ const p=normText.indexOf(t); if(p>=0 && (i<0||p<i)) i=p; });
     if(i<0) return "";
-    const start=Math.max(0, i-50), end=Math.min(text.length, i+q.length+70);
+    const start=Math.max(0, i-50), end=Math.min(text.length, i+70);
     return (start>0?"… ":"") + text.slice(start,end).trim() + (end<text.length?" …":"");
+  }
+  function highlightSnippet(snipHtml, tokens){
+    if(!tokens.length) return snipHtml;
+    const re=new RegExp("("+tokens.map(function(t){return t.replace(/[.*+?^\${}()|[\]\\]/g,"\\$&")}).join("|")+")","gi");
+    return snipHtml.replace(re,"<mark>$1</mark>");
   }
   function matchesFilter(x){
     if(activeFilter==="image") return !!x.img;
@@ -1941,55 +2169,60 @@ function generateHome(){
       return x;
     });
   }).catch(function(){index=[]});
-  function scoreEntry(x,q){
+  function scoreEntry(x,tokens){
     let score=0;
-    if(x._normTitle===q) score+=1000;
-    else if(x._normTitle.indexOf(q)===0) score+=500;
-    else if(x._normTitle.includes(q)) score+=300;
-    const idx=x._normText.indexOf(q);
-    if(idx>=0){
-      score+=Math.max(0,80-Math.floor(idx/15));
-      let count=0,pos=0;
-      while((pos=x._normText.indexOf(q,pos))!==-1){count++;pos+=q.length}
-      score+=Math.min(count,10)*4;
-    }
+    const nt=x._normTitle, full=tokens.join(" ");
+    if(nt===full) score+=1000;
+    else if(nt.indexOf(full)===0) score+=500;
+    else if(nt.includes(full)) score+=300;
+    tokens.forEach(function(t){
+      if(nt.includes(t)) score+=150;
+      const idx=x._normText.indexOf(t);
+      if(idx>=0){
+        score+=Math.max(0,40-Math.floor(idx/20));
+        let count=0,pos=0;
+        while((pos=x._normText.indexOf(t,pos))!==-1){count++;pos+=t.length}
+        score+=Math.min(count,10)*2;
+      }
+    });
     return score;
   }
   function runSearch(){
     const rawQ=box.value.trim();
-    const q=norm(rawQ);
+    const tokens=tokenize(rawQ);
     results.innerHTML="";
-    if(q.length<2 && activeFilter==="all"){results.classList.remove("open");return}
+    if(!tokens.length && activeFilter==="all"){results.classList.remove("open");return}
     let found=index.filter(function(x){
-      return (q.length<2 || x._normText.includes(q)) && matchesFilter(x);
+      return (!tokens.length || tokens.every(function(t){return x._normText.includes(t)})) && matchesFilter(x);
     });
-    if(q.length>=2){
-      found=found.map(function(x){return {x:x,s:scoreEntry(x,q)}}).sort(function(a,b){return b.s-a.s}).map(function(p){return p.x});
+    if(tokens.length){
+      found=found.map(function(x){return {x:x,s:scoreEntry(x,tokens)}}).sort(function(a,b){return b.s-a.s}).map(function(p){return p.x});
     }
     const totalFound=found.length;
-    found=found.slice(0,40);
-    if(!found.length){
+    const shown=found.slice(0,PREVIEW_CAP);
+    if(!shown.length){
       results.innerHTML='<div class="search-empty">Aucun résultat trouvé.</div>';
       results.classList.add("open");
       if(status) status.textContent="Aucun résultat trouvé.";
       return;
     }
-    results.innerHTML=found.map(function(x){
+    let html=shown.map(function(x){
       const normText=x._normText;
-      const snip=q.length>=2?snippetAround(x.text, normText, q):"";
-      const hrefWithHl=x.href+(q.length>=2?(x.href.includes("?")?"&":"?")+"hl="+encodeURIComponent(rawQ):"");
+      const snip=tokens.length?snippetAround(x.text, normText, tokens):"";
+      const hrefWithHl=x.href+(tokens.length?(x.href.includes("?")?"&":"?")+"hl="+encodeURIComponent(rawQ):"");
       let snipHtml=escS(snip);
-      if(snip){
-        const re=new RegExp("("+rawQ.trim().replace(/[.*+?^\${}()|[\]\\]/g,"\\$&")+")","gi");
-        snipHtml=snipHtml.replace(re,"<mark>$1</mark>");
-      }
+      if(snip) snipHtml=highlightSnippet(snipHtml, tokens);
       return '<a class="search-result" href="'+escS(hrefWithHl)+'"><div class="search-result-title">'+escS(x.title)+badgesFor(x)+'</div><div class="search-result-path">'+escS(x.chapter)+'</div>'
         +(snip?'<div class="search-result-snippet">'+snipHtml+'</div>':'')+'</a>';
     }).join("");
+    if(totalFound>shown.length){
+      html+='<a class="search-see-all" href="recherche.html?q='+encodeURIComponent(rawQ)+'&f='+encodeURIComponent(activeFilter)+'">🔎 Voir les '+totalFound+' résultats →</a>';
+    }
+    results.innerHTML=html;
     results.classList.add("open");
     if(status){
-      status.textContent = totalFound>40
-        ? totalFound+" résultats trouvés, 40 affichés."
+      status.textContent = totalFound>shown.length
+        ? totalFound+" résultats trouvés."
         : totalFound+" résultat"+(totalFound>1?"s":"")+" trouvé"+(totalFound>1?"s":"")+".";
     }
   }
@@ -2005,6 +2238,7 @@ function generateHome(){
       btn.classList.add("active");
       btn.setAttribute("aria-pressed","true");
       activeFilter=btn.getAttribute("data-filter");
+      if(filterHidden) filterHidden.value=activeFilter;
       runSearch();
     });
   }
@@ -2586,6 +2820,7 @@ async function exportZip(){
 
   zip.file("index.html",generateHome());
   zip.file("specialites.html",generateSpecialtyPage());
+  zip.file("recherche.html",generateSearchPage());
   zip.file("404.html",generate404Page());
   zip.file("nav-tree.json", JSON.stringify(EXPORT_NAV_TREE));
 
