@@ -411,6 +411,22 @@ async function importZip(file){
     else assets[p]=await obj.async("uint8array");
   }
 
+  // GitHub "Télécharger ZIP" (et des outils similaires) enveloppent tout le
+  // contenu dans un unique dossier <repo>-<branche>/. Sans ce nettoyage, ce
+  // dossier serait pris pour un chapitre unique contenant tout le site.
+  {
+    let allPaths=[...Object.keys(files),...Object.keys(assets)];
+    if(allPaths.length>1){
+      let firstSegs=new Set(allPaths.map(p=>p.split("/")[0]));
+      let hasNestedPath=allPaths.some(p=>p.includes("/"));
+      if(firstSegs.size===1 && hasNestedPath){
+        let wrapper=[...firstSegs][0]+"/";
+        let stripWrapper=obj=>{let out={};for(let[p,v]of Object.entries(obj))out[p.startsWith(wrapper)?p.slice(wrapper.length):p]=v;return out};
+        files=stripWrapper(files); assets=stripWrapper(assets);
+      }
+    }
+  }
+
   // ZIP "brut" généré par le script Python/Colab : un JSON {data:{...,chapitres:[...]}}
   // accompagné d'un dossier images/, sans pages HTML. On le distingue d'un ZIP de site déjà exporté.
   let rawData=null, rawDataPath=null;
