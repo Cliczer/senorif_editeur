@@ -1674,6 +1674,10 @@ h1{color:#3f6aa8;font-size:clamp(34px,5vw,58px);font-weight:900}
 .specialty-button:hover{background:#3a8873}
 @media(max-width:640px){.header-top{flex-direction:column}}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start}
+.theme-zones{display:flex;flex-direction:column;gap:22px}
+.theme-zone{background:var(--zone-bg,#f4f5f7);border-radius:22px;padding:20px 20px 24px}
+.theme-title{font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#33456a;margin:0 0 14px 4px}
+@media(max-width:640px){.theme-zone{padding:16px 14px 20px;border-radius:18px}}
 
 .chapter summary{
   list-style:none;
@@ -1774,18 +1778,17 @@ const SPECIALTY_MAP=[
     {chapitre:"Génomique tumorale"}
   ]},
   {label:"Chirurgie", items:[
-    {chapitre:"Chirurgie"},
-    {chapitre:"Carcinome in situ (CIS)", dossier:"Chirurgie"}
+    {chapitre:"Traitements des cancers infiltrants", path:["Traitements locorégionaux"]},
+    {chapitre:"Carcinome in situ (CIS)", path:["Chirurgie"]}
   ]},
   {label:"Radiothérapie", items:[
-    {chapitre:"Carcinome in situ (CIS)", dossier:"Radiothérapie des carcinomes in situ"},
-    {chapitre:"Traitements des cancers infiltrants", dossier:"Radiothérapie des formes infiltrantes"}
+    {chapitre:"Carcinome in situ (CIS)", path:["Radiothérapie des carcinomes in situ"]},
+    {chapitre:"Traitements des cancers infiltrants", path:["Traitements locorégionaux","Radiothérapie"]}
   ]},
   {label:"Oncologie médicale", items:[
-    {chapitre:"Traitements des cancers infiltrants", dossier:"Traitements médicaux néoadjuvants"},
-    {chapitre:"Traitements des cancers infiltrants", dossier:"Traitements médicaux adjuvants"},
-    {chapitre:"Traitements des cancers infiltrants", dossier:"Formes particulières"},
-    {chapitre:"Traitements des cancers infiltrants", dossier:"Formes localement avancées"},
+    {chapitre:"Traitements des cancers infiltrants", path:["Traitements médicaux","Néoadjuvant"]},
+    {chapitre:"Traitements des cancers infiltrants", path:["Traitements médicaux","Adjuvant"]},
+    {chapitre:"Traitements des cancers infiltrants", path:["Formes particulières dont localement avancées"]},
     {chapitre:"Cancer du sein avancé"}
   ]},
   {label:"Soins de support", items:[{chapitre:"Soins de support"}]},
@@ -1799,6 +1802,20 @@ function generateSpecialtyPage(){
   function findChapter(titre){ return data.chapitres.find(c=>c.titre===titre); }
   function findChild(ch,titre){ return (ch.enfants||[]).find(e=>e.titre===titre); }
   function hrefForChapter(ch){ return slugify(ch.slug||ch.titre)+"/index.html"; }
+  // path:[...] permet de pointer un dossier imbriqué à n'importe quelle
+  // profondeur (les entrées "dossier" simples ne trouvaient qu'un enfant
+  // direct, ce qui casse silencieusement dès qu'un dossier est réorganisé
+  // plus profondément dans l'arborescence).
+  function resolvePath(ch,titles){
+    let cur=ch, parts=[ch.slug];
+    for(const titre of titles){
+      let next=findChild(cur,titre);
+      if(!next) return null;
+      cur=next; parts.push(next.slug);
+    }
+    let href=parts.join("/")+(cur.type==="folder"?"/index.html":".html");
+    return {node:cur, href};
+  }
 
   const colors=["#5570AE","#D9A441","#8E7CC3","#48A68D","#3F8CC9","#E67E22","#C15A8A","#5570AE"];
   let b="";
@@ -1806,10 +1823,10 @@ function generateSpecialtyPage(){
     let items=spec.items.map(it=>{
       let ch=findChapter(it.chapitre);
       if(!ch) return "";
-      if(it.dossier){
-        let node=findChild(ch,it.dossier);
-        if(!node) return "";
-        return `<li><a class="subchapter-btn" href="${hrefForHome(ch,node)}"><span class="chev">›</span><span>${esc(node.titre)}</span></a></li>`;
+      if(it.path){
+        let resolved=resolvePath(ch,it.path);
+        if(!resolved) return "";
+        return `<li><a class="subchapter-btn" href="${resolved.href}"><span class="chev">›</span><span>${esc(resolved.node.titre)}</span></a></li>`;
       }
       return `<li><a class="subchapter-btn" href="${hrefForChapter(ch)}"><span class="chev">›</span><span>${esc(ch.titre)}</span></a></li>`;
     }).join("");
@@ -1836,15 +1853,39 @@ function hrefForHome(ch,c){
   return ch.slug+"/"+(c.type==="folder" ? c.slug+"/index.html" : c.slug+".html");
 }
 
+// Regroupement visuel de la page d'accueil en 4 grands thèmes (fond de
+// couleur par thème), d'après la maquette PowerPoint fournie. Un chapitre
+// ajouté plus tard et absent de cette liste atterrit dans une zone "Autres"
+// neutre, pour ne jamais disparaître silencieusement de l'accueil.
+const HOME_THEMES=[
+  {titre:"Aspects généraux", bg:"#eef2fa", slugs:["generalites","liens-utiles-outils"]},
+  {titre:"Dépistage et diagnostic", bg:"#f3eefb", slugs:["genetique-depistage-prevention","imagerie","anatomopathologie","genomique-tumorale"]},
+  {titre:"Lésions précancéreuses", bg:"#eaf6f3", slugs:["lesions-benignes-et-b3","carcinome-in-situ-cis"]},
+  {titre:"Traitements du cancer du sein", bg:"#fdf3e9", slugs:["traitements-des-cancers-infiltrants","soins-de-support","cancer-du-sein-avance"]}
+];
+
 function generateHome(){
-  let b="";
-  data.chapitres.forEach(ch=>{
+  function cardFor(ch){
     let items=(ch.enfants||[]).map(c=>`<li><a class="subchapter-btn" href="${hrefForHome(ch,c)}"><span class="chev">›</span><span>${esc(c.titre)}</span></a></li>`).join("");
-    b+=`<details class="chapter" style="--accent:${ch.color||firstColor()}" data-path="${esc(ch.slug||"")}">
+    return `<details class="chapter" style="--accent:${ch.color||firstColor()}" data-path="${esc(ch.slug||"")}">
   <summary><span class="summary-title">${esc(ch.titre)}</span><span class="update-date">MAJ : …</span></summary>
   <div class="panel"><div class="arrow"></div><h2>${esc(ch.titre)}</h2><ul>${items}</ul></div>
 </details>`;
+  }
+
+  const used=new Set();
+  let zones="";
+  HOME_THEMES.forEach(theme=>{
+    const chapitres=theme.slugs.map(s=>data.chapitres.find(c=>c.slug===s)).filter(Boolean);
+    chapitres.forEach(c=>used.add(c.id));
+    if(!chapitres.length) return;
+    zones+=`<section class="theme-zone" style="--zone-bg:${theme.bg}"><h2 class="theme-title">${esc(theme.titre)}</h2><div class="grid">${chapitres.map(cardFor).join("")}</div></section>`;
   });
+  const rest=data.chapitres.filter(c=>!used.has(c.id));
+  if(rest.length){
+    zones+=`<section class="theme-zone" style="--zone-bg:#f4f5f7"><h2 class="theme-title">Autres</h2><div class="grid">${rest.map(cardFor).join("")}</div></section>`;
+  }
+
   return`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(data.titre)}</title>${siteHeadExtras(data.sous_titre||"Référentiel interactif des recommandations sur les cancers et pathologies du sein.")}<style>${homeCss()}</style></head><body><div class="wrapper"><header>
 <div class="header-top">
 <div class="header-title"><h1>${esc(data.titre)}</h1><p class="subtitle">${esc(data.sous_titre||"Cancers et pathologies du sein")}</p></div>
@@ -1864,7 +1905,7 @@ function generateHome(){
 <div class="search-results" id="searchResults"></div>
 <div class="sr-only" id="searchStatus" role="status" aria-live="polite"></div>
 </div>
-<div class="grid">${b}</div></div>
+<div class="theme-zones">${zones}</div></div>
 <script>(function(){const host=window.location.hostname;const pathParts=window.location.pathname.split("/").filter(Boolean);const OWNER=host.endsWith("github.io")?host.split(".")[0]:"Cliczer";const REPO=pathParts[0]||"Senorif";const CACHE_KEY="senorif_update_dates_v1";const CACHE_TTL=24*60*60*1000;function readCache(){try{return JSON.parse(localStorage.getItem(CACHE_KEY)||"{}")}catch(e){return{}}}function writeCache(c){try{localStorage.setItem(CACHE_KEY,JSON.stringify(c))}catch(e){}}function formatDate(d){return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"})}async function getLastUpdate(folderPath){const cache=readCache();const hit=cache[folderPath];if(hit && (Date.now()-hit.ts)<CACHE_TTL){return hit.iso?new Date(hit.iso):null}try{const url="https://api.github.com/repos/"+OWNER+"/"+REPO+"/commits?path="+encodeURIComponent(folderPath)+"&per_page=1";const r=await fetch(url);if(!r.ok){cache[folderPath]={ts:Date.now(),iso:null};writeCache(cache);return null}const commits=await r.json();const iso=(Array.isArray(commits)&&commits.length)?commits[0].commit.committer.date:null;cache[folderPath]={ts:Date.now(),iso};writeCache(cache);return iso?new Date(iso):null}catch(e){return null}}async function loadDates(){const chapters=document.querySelectorAll(".chapter");for(const chapter of chapters){const dateEl=chapter.querySelector(".update-date");const folderPath=chapter.getAttribute("data-path");if(!dateEl||!folderPath||folderPath==="#"){if(dateEl)dateEl.textContent="MAJ : —";continue}const date=await getLastUpdate(folderPath);dateEl.textContent=date?"MAJ : "+formatDate(date):"MAJ : —"}}loadDates()})();<\/script>
 <script>(function(){
   function norm(v){return String(v||"").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")}
