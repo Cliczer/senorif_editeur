@@ -2859,7 +2859,37 @@ function buildSearchIndex(){
   return entries.filter(e=>e.text);
 }
 
+// Déclenche le téléchargement d'un Blob de façon fiable même pour un gros
+// fichier (16+ Mo) : l'ancre doit être dans le DOM pour certains navigateurs,
+// et révoquer l'URL trop tôt après le clic peut couper le téléchargement en
+// cours (fichier tronqué -> ZIP "invalide" à l'ouverture).
+function downloadBlob(blob, filename){
+  let url=URL.createObjectURL(blob);
+  let a=document.createElement("a");
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 30000);
+}
+
 async function exportZip(){
+  if(typeof JSZip==="undefined"){
+    alert("JSZip n'a pas pu se charger (vérifie ta connexion internet), impossible d'exporter le ZIP.");
+    return;
+  }
+  setStatus("Génération du ZIP...");
+  try{
+    await exportZipInner();
+  }catch(err){
+    console.error(err);
+    alert("L'export du ZIP a échoué : "+err.message+"\nRéessaie ; si le problème persiste, vérifie ta connexion et l'espace disque disponible.");
+    setStatus("Échec de l'export.");
+  }
+}
+
+async function exportZipInner(){
   let zip=new JSZip();
 
   const navBuild=buildNavTreeAndInfo();
@@ -2913,11 +2943,8 @@ async function exportZip(){
   zip.file("search-index.json", JSON.stringify(buildSearchIndex()));
 
   let blob=await zip.generateAsync({type:"blob"});
-  let a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download="site-senorif-export.zip";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob(blob, "site-senorif-export.zip");
+  setStatus("ZIP exporté ("+(Math.round(blob.size/1024/1024*10)/10)+" Mo).");
 }
 
 
