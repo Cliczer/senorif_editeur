@@ -326,7 +326,27 @@ const SENORIF_COLORS = ["#5570AE", "#D9A441", "#8E7CC3", "#3F8CC9", "#E67E22", "
 const SENORIF_COLOR_LABELS = {"#5570AE": "Bleu — Généralités", "#D9A441": "Jaune — Prévention / dépistage", "#8E7CC3": "Violet — Évaluation / diagnostic", "#3F8CC9": "Bleu clair — Lésions bénignes / intermédiaires", "#48A68D": "Vert — Traitements locaux", "#E67E22": "Orange — Traitements médicaux", "#C15A8A": "Rose — Situations particulières / suivi"};
 
 function uid(){return"n"+Math.random().toString(36).slice(2,9)}
-function slugify(s){return String(s||"page").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/œ/g,"oe").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"page"}
+function slugify(s){
+  let base=String(s||"page").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/œ/g,"oe").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"page";
+  const MAX=50;
+  if(base.length<=MAX) return base;
+  // Certains titres tres longs produisent, une fois combines avec les
+  // dossiers parents, des chemins de plus de 250 caracteres : sur Windows,
+  // l'extraction native du ZIP echoue au-dela d'environ 260 caracteres. On
+  // tronque donc chaque segment, avec un suffixe stable derive du titre
+  // complet pour eviter les collisions entre deux titres tronques identiques.
+  // Important : le resultat final doit rester <= MAX, sinon un second appel
+  // a slugify() sur ce resultat (ca arrive : le code appelle parfois
+  // slugify(n.slug) par securite) le tronquerait a nouveau avec un hash
+  // DIFFERENT (calcule sur une base differente), cassant les liens deja
+  // generes avec le premier resultat.
+  let hash=0; for(let i=0;i<base.length;i++){hash=(hash*31+base.charCodeAt(i))>>>0;}
+  let suffix="-"+hash.toString(36).slice(0,5);
+  let cut=base.slice(0,MAX-suffix.length);
+  let lastDash=cut.lastIndexOf("-");
+  if(lastDash>20) cut=cut.slice(0,lastDash);
+  return cut+suffix;
+}
 function esc(s){return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
 function cleanPath(p){return p.replace(/^\/+/,"").replace(/\\/g,"/")}
 function setStatus(s){$("status").textContent=s}
@@ -2891,6 +2911,20 @@ async function exportZip(){
 
 async function exportZipInner(){
   let zip=new JSZip();
+
+  // Normalise tous les slugs AVANT de generer la moindre page : plusieurs
+  // generateurs (liste des enfants d'un dossier, page d'accueil, page
+  // specialites...) lisent directement `n.slug` en supposant qu'il est deja
+  // definitif. Si on le recalculait plus tard, pendant la traversee (comme
+  // avant), un dossier genere avant que ses enfants ne soient normalises
+  // pouvait pointer vers d'anciens slugs (404 une fois le slug tronque -
+  // voir slugify) : on fige donc tout l'arbre en un seul passage, en amont.
+  (function normalizeSlugs(nodes){
+    (nodes||[]).forEach(n=>{
+      n.slug=slugify(n.slug||n.titre);
+      if(n.enfants&&n.enfants.length) normalizeSlugs(n.enfants);
+    });
+  })(data.chapitres);
 
   const navBuild=buildNavTreeAndInfo();
   EXPORT_NAV_TREE=navBuild.tree;
