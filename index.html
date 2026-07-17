@@ -30,6 +30,19 @@ main{overflow:auto;padding:20px;min-width:0}
 .node-btn.selected{background:#e8f1ff;border-color:#bcd2ff;color:#244f9e}
 .tree-toggle{flex:0 0 auto;width:14px;text-align:center;color:#8290a8;font-size:11px}
 .tree-toggle-spacer{visibility:hidden}
+.node-btn[draggable=true]{cursor:grab}
+.node-btn.drag-source{opacity:.4}
+.node-btn.drag-over-top{box-shadow:inset 0 2px 0 0 var(--blue)}
+.node-btn.drag-over-bottom{box-shadow:inset 0 -2px 0 0 var(--blue)}
+.autosave-indicator{margin-left:auto;font-size:12px;color:var(--muted);font-weight:700;white-space:nowrap}
+.tree-search{width:100%;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:13px;margin-bottom:6px}
+.tree-search-results{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;max-height:260px;overflow:auto;background:#f9fafb}
+.tree-search-result{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--border);background:transparent;padding:8px 10px;cursor:pointer;font-family:inherit}
+.tree-search-result:last-child{border-bottom:0}
+.tree-search-result:hover{background:#eef5ff}
+.tree-search-result .tsr-title{font-weight:800;font-size:13px;display:block}
+.tree-search-result .tsr-path{font-size:11px;color:var(--muted);display:block;margin-top:2px}
+.tree-search-empty{padding:10px;color:var(--muted);font-size:13px}
 .badge{font-size:10px;font-weight:900;padding:2px 6px;border-radius:999px;background:#eef2ff;color:#4868a8;margin-left:auto}
 .preview-card{max-width:900px;margin:0 auto;background:white;border-top:10px solid var(--blue);border-radius:22px;box-shadow:0 10px 30px rgba(31,50,90,.08);padding:34px}
 .preview-card.home-mode{max-width:none;background:transparent;border-top:0;box-shadow:none;padding:0}
@@ -207,6 +220,8 @@ textarea{min-height:180px}
   <button onclick="newProject()">Nouveau</button>
   <button onclick="selectedId=null;render()">Aperçu accueil</button>
   <button class="primary" onclick="exportZip()">Exporter ZIP</button>
+  <button class="small" onclick="saveDraftNow()" title="Force une sauvegarde immédiate du brouillon (sinon automatique après chaque modification)">💾 Sauvegarder le brouillon</button>
+  <span id="autosaveIndicator" class="autosave-indicator"></span>
 </header>
 
 <div class="layout">
@@ -218,10 +233,12 @@ textarea{min-height:180px}
     <button class="small" onclick="addRoot()">+ Chapitre</button>
     <button class="small" onclick="addChild('folder')">+ Dossier</button>
     <button class="small" onclick="addChild('page')">+ Page</button>
-    
+
     <button class="small danger" onclick="deleteSelected()">Supprimer</button>
   </div>
   <h3>Structure</h3>
+  <input id="treeSearch" class="tree-search" placeholder="🔎 Rechercher une page ou un chapitre à modifier…" oninput="filterTreeSearch(this.value)" onkeydown="if(event.key==='Escape'){this.value='';filterTreeSearch('')}">
+  <div id="treeSearchResults" class="tree-search-results" style="display:none"></div>
   <div id="tree" class="tree"></div>
 </aside>
 
@@ -365,7 +382,7 @@ function defaultData(){
 
 function newProject(){
   if(confirm("Créer un nouveau site vide ? Le contenu actuellement chargé dans l'éditeur sera perdu (exporte-le avant si tu veux le garder).")){
-    assets={}; data=defaultData(); selectedId=null; render(); setStatus("Nouveau site vide créé.");
+    assets={}; data=defaultData(); selectedId=null; discardAutosave(); render(); setStatus("Nouveau site vide créé.");
   }
 }
 
@@ -677,7 +694,10 @@ function renderTree(){
       let hasChildren=!!(n.enfants&&n.enfants.length);
       let isCollapsed=collapsedIds.has(n.id);
       let toggle=hasChildren?`<span class="tree-toggle">${isCollapsed?"▸":"▾"}</span>`:`<span class="tree-toggle tree-toggle-spacer"></span>`;
-      h+=`<li><button class="node-btn ${selectedId===n.id?"selected":""}" onclick="selectNode('${n.id}')">${toggle}<span>${icon}</span><span>${esc(n.titre)}${q}</span><span class="badge">${n.type}</span></button>`;
+      h+=`<li><button class="node-btn ${selectedId===n.id?"selected":""}" draggable="true" `
+        +`ondragstart="handleNodeDragStart(event,'${n.id}')" ondragover="handleNodeDragOver(event,'${n.id}')" `
+        +`ondragleave="handleNodeDragLeave(event)" ondrop="handleNodeDrop(event,'${n.id}')" ondragend="handleNodeDragEnd(event)" `
+        +`onclick="selectNode('${n.id}')">${toggle}<span>${icon}</span><span>${esc(n.titre)}${q}</span><span class="badge">${n.type}</span></button>`;
       if(hasChildren && !isCollapsed) h+=branch(n.enfants);
       h+="</li>";
     });
@@ -695,6 +715,116 @@ function selectNode(id){
     if(collapsedIds.has(id)) collapsedIds.delete(id); else collapsedIds.add(id);
   }
   selectedId=id; render();
+}
+
+// ===== Réorganisation de l'arbre par glisser-déposer =====
+// Permet de réordonner un chapitre/dossier/page parmi ses frères et sœurs en
+// le glissant à l'endroit voulu, comme alternative rapide aux boutons
+// "Monter"/"Descendre" (fastidieux pour de grands déplacements).
+let dragNodeId=null;
+
+function handleNodeDragStart(e,id){
+  dragNodeId=id;
+  e.dataTransfer.effectAllowed="move";
+  try{ e.dataTransfer.setData("text/plain",id); }catch(err){}
+  e.currentTarget.classList.add("drag-source");
+}
+
+function handleNodeDragOver(e,id){
+  if(!dragNodeId || dragNodeId===id) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect="move";
+  let rect=e.currentTarget.getBoundingClientRect();
+  let before=(e.clientY-rect.top) < rect.height/2;
+  e.currentTarget.classList.toggle("drag-over-top",before);
+  e.currentTarget.classList.toggle("drag-over-bottom",!before);
+}
+
+function handleNodeDragLeave(e){
+  e.currentTarget.classList.remove("drag-over-top","drag-over-bottom");
+}
+
+function handleNodeDragEnd(){
+  dragNodeId=null;
+  document.querySelectorAll(".node-btn.drag-source").forEach(el=>el.classList.remove("drag-source"));
+  document.querySelectorAll(".node-btn.drag-over-top,.node-btn.drag-over-bottom").forEach(el=>el.classList.remove("drag-over-top","drag-over-bottom"));
+}
+
+function handleNodeDrop(e,targetId){
+  e.preventDefault();
+  let before=e.currentTarget.classList.contains("drag-over-top");
+  e.currentTarget.classList.remove("drag-over-top","drag-over-bottom");
+  let draggedId=dragNodeId; dragNodeId=null;
+  if(!draggedId || draggedId===targetId) return;
+  let src=findNode(draggedId), dst=findNode(targetId);
+  if(!src || !dst) return;
+  let srcParentId=src.parent?src.parent.id:null, dstParentId=dst.parent?dst.parent.id:null;
+  if(srcParentId!==dstParentId){
+    setStatus("On ne peut réorganiser qu'à l'intérieur du même chapitre/dossier pour l'instant (glisse vers un frère du même niveau).");
+    return;
+  }
+  let [it]=src.list.splice(src.index,1);
+  let targetIndex=dst.list.indexOf(dst.node);
+  let insertAt=before?targetIndex:targetIndex+1;
+  dst.list.splice(insertAt,0,it);
+  selectedId=draggedId;
+  render();
+}
+
+// ===== Recherche rapide dans l'arbre =====
+// Pour aller vite vers la page/le chapitre à modifier sans le chercher à la
+// main dans une arborescence de plusieurs centaines d'éléments.
+function normalizeSearchText(s){
+  return String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+}
+
+function collectSearchableNodes(nodes,trail){
+  let out=[];
+  (nodes||[]).forEach(n=>{
+    out.push({id:n.id,titre:n.titre,type:n.type,path:trail.join(" › ")});
+    if(n.enfants&&n.enfants.length) out=out.concat(collectSearchableNodes(n.enfants,trail.concat([n.titre])));
+  });
+  return out;
+}
+
+function filterTreeSearch(q){
+  let box=$("treeSearchResults"); if(!box) return;
+  let query=normalizeSearchText(q).trim();
+  if(!query){ box.style.display="none"; box.innerHTML=""; return; }
+  let tokens=query.split(/\s+/).filter(Boolean);
+  let all=collectSearchableNodes(data.chapitres,[]);
+  let matches=all.filter(it=>{
+    let norm=normalizeSearchText(it.titre);
+    return tokens.every(t=>norm.includes(t));
+  }).slice(0,30);
+  box.style.display="block";
+  if(!matches.length){
+    box.innerHTML='<div class="tree-search-empty">Aucun résultat.</div>';
+    return;
+  }
+  box.innerHTML=matches.map(m=>{
+    let icon=m.type==="page"?"📄":"📁";
+    return `<button type="button" class="tree-search-result" onclick="jumpToNode('${m.id}')"><span class="tsr-title">${icon} ${esc(m.titre)}</span>${m.path?`<span class="tsr-path">${esc(m.path)}</span>`:""}</button>`;
+  }).join("");
+}
+
+function jumpToNode(id){
+  let f=findNode(id); if(!f) return;
+  // Déplie tous les ancêtres pour que l'élément soit visible dans l'arbre.
+  let parentNode=f.parent;
+  while(parentNode){
+    collapsedIds.delete(parentNode.id);
+    let pf=findNode(parentNode.id);
+    parentNode=pf?pf.parent:null;
+  }
+  selectedId=id;
+  let box=$("treeSearchResults"); if(box){ box.style.display="none"; box.innerHTML=""; }
+  let input=$("treeSearch"); if(input) input.value="";
+  render();
+  setTimeout(()=>{
+    let el=document.querySelector(".node-btn.selected");
+    if(el) el.scrollIntoView({block:"center",behavior:"smooth"});
+  },50);
 }
 
 
@@ -888,7 +1018,7 @@ function renderPreview(){
   }
 }
 
-function render(ed=true){renderTree(); renderPreview(); if(ed) renderEditor()}
+function render(ed=true){renderTree(); renderPreview(); if(ed) renderEditor(); scheduleAutosave()}
 
 function addRoot(){
   let n={id:uid(),titre:"Nouveau chapitre",slug:"nouveau-chapitre",type:"folder",color:firstColor(),enfants:[],contenu_html:""};
@@ -1170,6 +1300,83 @@ function loadLocal(){
   let s=localStorage.getItem("senorif_editeur_data"); if(!s) return alert("Aucune sauvegarde.");
   let obj=JSON.parse(s); data=obj.data; assets=restoreAssets(obj.assets||{}); selectedId=data.chapitres[0]?.id; render(); setStatus("Rechargé.");
 }
+
+// ===== Brouillon automatique (localStorage) =====
+// Protege contre la perte de travail (onglet ferme par erreur, crash du
+// navigateur...) : sauvegarde silencieusement apres chaque modification
+// (avec un court delai pour ne pas sauvegarder a chaque frappe), et propose
+// de reprendre le brouillon au demarrage si on en trouve un.
+const AUTOSAVE_KEY="senorif_editeur_autosave_v1";
+let autosaveTimer=null;
+
+function scheduleAutosave(){
+  clearTimeout(autosaveTimer);
+  autosaveTimer=setTimeout(doAutosave,1200);
+}
+
+function doAutosave(){
+  if(!data || !data.chapitres || !data.chapitres.length) return;
+  let ts=Date.now();
+  try{
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({data, assets:serialiseAssets(), ts}));
+    showAutosaveIndicator(ts,true);
+  }catch(e){
+    // Le site complet (avec les images) depasse souvent le quota de
+    // localStorage (~5-10 Mo) : on retente sans les images, pour au moins
+    // proteger le texte/la structure/les couleurs, ce qui est l'essentiel
+    // en cas de perte accidentelle.
+    try{
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({data, assets:{}, ts, assetsOmitted:true}));
+      showAutosaveIndicator(ts,false);
+    }catch(e2){
+      let el=$("autosaveIndicator");
+      if(el) el.textContent="⚠️ Brouillon trop volumineux pour la sauvegarde automatique — exporte le ZIP pour ne rien perdre.";
+    }
+  }
+}
+
+function showAutosaveIndicator(ts,withAssets){
+  let el=$("autosaveIndicator"); if(!el) return;
+  let time=new Date(ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  el.textContent="💾 Brouillon enregistré à "+time+(withAssets?"":" (images non incluses, trop volumineuses)");
+}
+
+function saveDraftNow(){
+  clearTimeout(autosaveTimer);
+  doAutosave();
+}
+
+function discardAutosave(){
+  try{ localStorage.removeItem(AUTOSAVE_KEY); }catch(e){}
+  let el=$("autosaveIndicator"); if(el) el.textContent="";
+}
+
+// Au chargement, si un brouillon existe, on propose de le reprendre plutôt
+// que d'écraser silencieusement du travail non exporté.
+function tryRestoreAutosave(){
+  let raw=null;
+  try{ raw=localStorage.getItem(AUTOSAVE_KEY); }catch(e){}
+  if(!raw) return false;
+  let saved;
+  try{ saved=JSON.parse(raw); }catch(e){ return false; }
+  if(!saved || !saved.data || !saved.data.chapitres || !saved.data.chapitres.length) return false;
+  let when=new Date(saved.ts||Date.now()).toLocaleString("fr-FR");
+  let msg="Un brouillon non exporté a été trouvé (dernière modification : "+when+")."
+    +(saved.assetsOmitted?"\n(Les images n'avaient pas pu être incluses dans cette sauvegarde automatique — réimporte le ZIP d'origine si besoin.)":"")
+    +"\n\nVeux-tu reprendre ce brouillon là où tu t'étais arrêté ?";
+  if(!confirm(msg)) return false;
+  data=saved.data;
+  assets=restoreAssets(saved.assets||{});
+  selectedId=data.chapitres[0]?.id||null;
+  return true;
+}
+
+window.addEventListener("beforeunload",function(e){
+  if(data && data.chapitres && data.chapitres.length){
+    e.preventDefault();
+    e.returnValue="";
+  }
+});
 
 function serialiseAssets(){
   let out={};
@@ -3024,7 +3231,11 @@ function gCenterOnNode(id){let n=gNode(id);if(!n)return;let canvas=$("graphCanva
 // l'éditeur essayait silencieusement de recharger le contenu HTML présent
 // dans SON PROPRE dépôt GitHub — du contenu de test obsolète y traînait,
 // ce qui donnait l'impression que des données apparaissaient toutes seules).
-data=defaultData();
+// On propose toutefois de reprendre un éventuel brouillon auto-sauvegardé
+// (onglet fermé par erreur, crash...) avant de repartir d'un site vide.
+if(!tryRestoreAutosave()){
+  data=defaultData();
+}
 render();
 </script>
 </body>
